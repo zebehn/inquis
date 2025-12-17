@@ -28,12 +28,25 @@ class TestSegmentationService:
         assert segmentation_service.device == "cpu"
         assert segmentation_service.checkpoint_path is not None
 
-    def test_segment_frame_returns_masks_and_scores(self, segmentation_service):
+    @patch('src.services.segmentation_service.SAM2AutomaticMaskGenerator')
+    @patch('src.services.segmentation_service.build_sam2')
+    def test_segment_frame_returns_masks_and_scores(self, mock_build_sam2, mock_mask_gen, segmentation_service):
         """Test that segment_frame returns masks and confidence scores."""
+        # Mock the mask generator
+        mock_generator = Mock()
+        mock_mask_gen.return_value = mock_generator
+        mock_generator.generate.return_value = [
+            {
+                'segmentation': np.ones((480, 640), dtype=bool),
+                'bbox': [10, 20, 100, 150],
+                'predicted_iou': 0.95,
+                'area': 15000,
+            }
+        ]
+
         # Create a test image
         image = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
 
-        # This will fail until we implement the service
         result = segmentation_service.segment_frame(image)
 
         assert isinstance(result, SegmentationResult)
@@ -60,8 +73,28 @@ class TestSegmentationService:
         assert len(result.class_labels) == 3
         assert len(result.bboxes) == 3
 
-    def test_segment_frame_filters_low_confidence(self, segmentation_service):
+    @patch('src.services.segmentation_service.SAM2AutomaticMaskGenerator')
+    @patch('src.services.segmentation_service.build_sam2')
+    def test_segment_frame_filters_low_confidence(self, mock_build_sam2, mock_mask_gen, segmentation_service):
         """Test that low confidence detections are filtered out."""
+        # Mock the mask generator with varying confidence scores
+        mock_generator = Mock()
+        mock_mask_gen.return_value = mock_generator
+        mock_generator.generate.return_value = [
+            {
+                'segmentation': np.ones((480, 640), dtype=bool),
+                'bbox': [10, 20, 100, 150],
+                'predicted_iou': 0.85,  # Above threshold
+                'area': 15000,
+            },
+            {
+                'segmentation': np.ones((480, 640), dtype=bool),
+                'bbox': [200, 100, 50, 80],
+                'predicted_iou': 0.90,  # Above threshold
+                'area': 4000,
+            }
+        ]
+
         image = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
 
         # Set confidence threshold
@@ -96,8 +129,22 @@ class TestSegmentationService:
         assert 3 in uncertain_indices
         assert 0 not in uncertain_indices
 
-    def test_segment_frame_batch(self, segmentation_service):
+    @patch('src.services.segmentation_service.SAM2AutomaticMaskGenerator')
+    @patch('src.services.segmentation_service.build_sam2')
+    def test_segment_frame_batch(self, mock_build_sam2, mock_mask_gen, segmentation_service):
         """Test batch segmentation for multiple frames."""
+        # Mock the mask generator
+        mock_generator = Mock()
+        mock_mask_gen.return_value = mock_generator
+        mock_generator.generate.return_value = [
+            {
+                'segmentation': np.ones((480, 640), dtype=bool),
+                'bbox': [10, 20, 100, 150],
+                'predicted_iou': 0.95,
+                'area': 15000,
+            }
+        ]
+
         # Create batch of test images
         images = [
             np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8) for _ in range(4)

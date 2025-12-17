@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import List, Tuple
 from dataclasses import dataclass
 import logging
+import torch
+from sam2.build_sam import build_sam2
+from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -74,12 +77,29 @@ class SegmentationService:
                 f"Checkpoint file not found: {self.checkpoint_path}"
             )
 
-        # TODO: Load actual SAM2 model
-        # from sam2 import SAM2Predictor
-        # self.model = SAM2Predictor.from_pretrained(self.checkpoint_path)
-        logger.warning(
-            "SAM2 model loading not implemented yet - using mock implementation"
+        logger.info(f"Loading SAM2 model from {self.checkpoint_path}")
+        logger.info(f"Using device: {self.device}")
+
+        # Build SAM2 model
+        sam2_model = build_sam2(
+            config_file=self.config,
+            ckpt_path=str(self.checkpoint_path),
+            device=self.device,
         )
+
+        # Create automatic mask generator
+        self.model = SAM2AutomaticMaskGenerator(
+            model=sam2_model,
+            points_per_side=32,
+            points_per_batch=64,
+            pred_iou_thresh=self.confidence_threshold,
+            stability_score_thresh=0.92,
+            stability_score_offset=1.0,
+            crop_n_layers=1,
+            box_nms_thresh=0.7,
+        )
+
+        logger.info("SAM2 model loaded successfully")
 
     def segment_frame(self, image: np.ndarray) -> SegmentationResult:
         """Segment a single frame using SAM2.
@@ -90,15 +110,54 @@ class SegmentationService:
         Returns:
             SegmentationResult with masks, confidences, labels, and bboxes
         """
-        # Mock implementation - returns empty results
-        # TODO: Replace with actual SAM2 inference
+        # Ensure model is loaded
+        if self.model is None:
+            self.load_model()
+
         h, w = image.shape[:2]
 
-        # For now, return empty results to satisfy the interface
-        masks = np.zeros((0, h, w), dtype=bool)
-        confidences = np.array([])
-        class_labels = []
+        # Run SAM2 automatic mask generation
+        logger.debug(f"Running SAM2 inference on image of shape {image.shape}")
+        mask_data = self.model.generate(image)
+
+        # If no masks detected, return empty results
+        if len(mask_data) == 0:
+            logger.debug("No masks detected")
+            return SegmentationResult(
+                masks=np.zeros((0, h, w), dtype=bool),
+                confidences=np.array([]),
+                class_labels=[],
+                bboxes=[],
+            )
+
+        # Extract masks, confidences, and bboxes from SAM2 output
+        masks = []
+        confidences = []
         bboxes = []
+        class_labels = []
+
+        for i, mask_dict in enumerate(mask_data):
+            # Extract mask (H, W) boolean array
+            mask = mask_dict["segmentation"]
+            masks.append(mask)
+
+            # Use predicted_iou as confidence score
+            confidence = mask_dict["predicted_iou"]
+            confidences.append(confidence)
+
+            # Extract bbox in (x, y, w, h) format
+            bbox = mask_dict["bbox"]
+            x, y, w_box, h_box = bbox
+            bboxes.append((int(x), int(y), int(w_box), int(h_box)))
+
+            # SAM2 doesn't provide semantic labels, use generic label
+            class_labels.append(f"object_{i+1}")
+
+        # Convert to numpy arrays
+        masks = np.array(masks, dtype=bool)  # (N, H, W)
+        confidences = np.array(confidences, dtype=np.float32)
+
+        logger.debug(f"Detected {len(masks)} instances")
 
         return SegmentationResult(
             masks=masks,
