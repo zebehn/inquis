@@ -61,20 +61,20 @@
 
 ### Tests for User Story 1 (TDD - Write FIRST, ensure FAILS)
 
-- [ ] T023 [P] [US1] Write unit test for VideoSession model validation in tests/unit/test_models.py
-- [ ] T024 [P] [US1] Write unit test for SegmentationFrame model validation in tests/unit/test_models.py
-- [ ] T025 [P] [US1] Write unit test for video_processor frame extraction in tests/unit/test_video_processor.py
-- [ ] T026 [P] [US1] Write unit test for segmentation_service SAM2 inference in tests/unit/test_segmentation_service.py
-- [ ] T027 [P] [US1] Write integration test for video-to-segmentation pipeline in tests/integration/test_pipeline.py
-- [ ] T028 [P] [US1] Write integration test for storage persistence in tests/integration/test_storage.py
+- [x] T023 [P] [US1] Write unit test for VideoSession model validation in tests/unit/test_models.py
+- [x] T024 [P] [US1] Write unit test for SegmentationFrame model validation in tests/unit/test_models.py
+- [x] T025 [P] [US1] Write unit test for video_processor frame extraction in tests/unit/test_video_processor.py
+- [x] T026 [P] [US1] Write unit test for segmentation_service SAM2 inference in tests/unit/test_segmentation_service.py
+- [x] T027 [P] [US1] Write integration test for video-to-segmentation pipeline in tests/integration/test_pipeline.py
+- [x] T028 [P] [US1] Write integration test for storage persistence in tests/integration/test_storage.py
 
 ### Implementation for User Story 1
 
-- [ ] T029 [P] [US1] Create VideoSession Pydantic model in src/models/video_session.py
-- [ ] T030 [P] [US1] Create SegmentationFrame Pydantic model in src/models/segmentation_frame.py
-- [ ] T031 [US1] Implement VideoProcessor with frame extraction using OpenCV in src/services/video_processor.py
-- [ ] T032 [US1] Implement SegmentationService with SAM2 model loading in src/services/segmentation_service.py
-- [ ] T033 [US1] Implement SAM2 inference method (segment_frame) in src/services/segmentation_service.py
+- [x] T029 [P] [US1] Create VideoSession Pydantic model in src/models/video_session.py
+- [x] T030 [P] [US1] Create SegmentationFrame Pydantic model in src/models/segmentation_frame.py
+- [x] T031 [US1] Implement VideoProcessor with frame extraction using OpenCV in src/services/video_processor.py
+- [x] T032 [US1] Implement SegmentationService with SAM2 model loading in src/services/segmentation_service.py
+- [x] T033 [US1] Implement SAM2 inference method (segment_frame) in src/services/segmentation_service.py
 - [ ] T034 [US1] Add VideoSession persistence methods to StorageService in src/services/storage_service.py
 - [ ] T035 [US1] Add SegmentationFrame persistence methods to StorageService in src/services/storage_service.py
 - [ ] T036 [US1] Create Streamlit app structure in src/gui/app.py
