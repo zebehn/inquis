@@ -1,0 +1,279 @@
+openapi: 3.0.0
+info:
+  title: Training Service Contract
+  description: Interface for incremental SAM2 model training
+  version: 1.0.0
+
+components:
+  schemas:
+    TrainingRequest:
+      type: object
+      required:
+        - dataset_id
+      properties:
+        dataset_id:
+          type: string
+          format: uuid
+          description: Training dataset to use
+        base_model_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Parent model version (null for base model)
+        training_params:
+          type: object
+          properties:
+            learning_rate:
+              type: number
+              format: float
+              default: 0.0001
+            epochs:
+              type: integer
+              minimum: 1
+              maximum: 20
+              default: 5
+            batch_size:
+              type: integer
+              minimum: 1
+              maximum: 16
+              default: 4
+            lora_rank:
+              type: integer
+              minimum: 4
+              maximum: 64
+              default: 8
+            validation_split:
+              type: number
+              format: float
+              minimum: 0.0
+              maximum: 0.5
+              default: 0.1
+
+    TrainingProgress:
+      type: object
+      properties:
+        epoch:
+          type: integer
+        total_epochs:
+          type: integer
+        batch:
+          type: integer
+        total_batches:
+          type: integer
+        loss:
+          type: number
+          format: float
+        learning_rate:
+          type: number
+          format: float
+        elapsed_time:
+          type: number
+          format: float
+          description: Seconds since training started
+        estimated_time_remaining:
+          type: number
+          format: float
+          description: Estimated seconds remaining
+
+    TrainingMetrics:
+      type: object
+      properties:
+        iou:
+          type: number
+          format: float
+          description: Intersection over Union
+        precision:
+          type: number
+          format: float
+        recall:
+          type: number
+          format: float
+        f1_score:
+          type: number
+          format: float
+        uncertainty_reduction:
+          type: number
+          format: float
+          description: Percentage reduction in uncertain regions
+        per_class_metrics:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              iou:
+                type: number
+                format: float
+              precision:
+                type: number
+                format: float
+              recall:
+                type: number
+                format: float
+
+    TrainingResult:
+      type: object
+      properties:
+        model_version_id:
+          type: string
+          format: uuid
+        version_number:
+          type: integer
+        checkpoint_path:
+          type: string
+        training_time:
+          type: number
+          format: float
+          description: Total training time in seconds
+        final_metrics:
+          $ref: '#/components/schemas/TrainingMetrics'
+        training_history:
+          type: array
+          items:
+            type: object
+            properties:
+              epoch:
+                type: integer
+              train_loss:
+                type: number
+                format: float
+              val_loss:
+                type: number
+                format: float
+              val_metrics:
+                $ref: '#/components/schemas/TrainingMetrics'
+
+paths:
+  /train:
+    post:
+      summary: Start model training
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingRequest'
+      responses:
+        '202':
+          description: Training started (async)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: ["queued", "running"]
+        '400':
+          description: Invalid training configuration
+
+  /train/status/{job_id}:
+    get:
+      summary: Get training job status
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Training status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: ["queued", "running", "completed", "failed"]
+                  progress:
+                    $ref: '#/components/schemas/TrainingProgress'
+                  result:
+                    $ref: '#/components/schemas/TrainingResult'
+                    nullable: true
+                  error:
+                    type: string
+                    nullable: true
+
+  /evaluate:
+    post:
+      summary: Evaluate model on validation set
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model_version_id:
+                  type: string
+                  format: uuid
+                validation_dataset_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Specific validation set (null for default)
+      responses:
+        '200':
+          description: Evaluation complete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingMetrics'
+
+  /compare_versions:
+    post:
+      summary: Compare metrics between model versions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  minItems: 2
+                  maxItems: 10
+      responses:
+        '200':
+          description: Comparison results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        version_id:
+                          type: string
+                          format: uuid
+                        version_number:
+                          type: integer
+                        metrics:
+                          $ref: '#/components/schemas/TrainingMetrics'
+                        improvement_over_parent:
+                          type: object
+                          properties:
+                            iou_delta:
+                              type: number
+                              format: float
+                            precision_delta:
+                              type: number
+                              format: float
+                            recall_delta:
+                              type: number
+                              format: float

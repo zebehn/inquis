@@ -1,0 +1,193 @@
+openapi: 3.0.0
+info:
+  title: Segmentation Service Contract
+  description: Interface for SAM2-based instance segmentation and uncertainty detection
+  version: 1.0.0
+
+components:
+  schemas:
+    Frame:
+      type: object
+      properties:
+        image:
+          type: string
+          format: byte
+          description: Base64-encoded image data or numpy array
+        frame_index:
+          type: integer
+          minimum: 0
+        timestamp:
+          type: number
+          format: float
+          minimum: 0
+
+    BoundingBox:
+      type: object
+      properties:
+        x:
+          type: integer
+          minimum: 0
+        y:
+          type: integer
+          minimum: 0
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+
+    InstanceMask:
+      type: object
+      properties:
+        mask:
+          type: array
+          description: Binary mask array (H x W)
+        class_label:
+          type: string
+        confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+        bbox:
+          $ref: '#/components/schemas/BoundingBox'
+        area:
+          type: integer
+          minimum: 0
+          description: Number of pixels in mask
+
+    UncertainRegion:
+      type: object
+      properties:
+        bbox:
+          $ref: '#/components/schemas/BoundingBox'
+        crop:
+          type: string
+          format: byte
+          description: Cropped image region
+        uncertainty_score:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+        top_predictions:
+          type: array
+          items:
+            type: object
+            properties:
+              class_label:
+                type: string
+              confidence:
+                type: number
+                format: float
+
+    SegmentationResult:
+      type: object
+      properties:
+        frame_index:
+          type: integer
+        masks:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceMask'
+        uncertainty_map:
+          type: array
+          description: 2D uncertainty heatmap
+        uncertain_regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/UncertainRegion'
+        processing_time:
+          type: number
+          format: float
+          description: Processing time in seconds
+
+paths:
+  /segment_frame:
+    post:
+      summary: Segment a single video frame
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                frame:
+                  $ref: '#/components/schemas/Frame'
+                confidence_threshold:
+                  type: number
+                  format: float
+                  default: 0.75
+                  description: Threshold for flagging uncertain regions
+      responses:
+        '200':
+          description: Segmentation successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SegmentationResult'
+        '400':
+          description: Invalid input
+        '500':
+          description: Processing error
+
+  /segment_batch:
+    post:
+      summary: Segment multiple frames in batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                frames:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Frame'
+                confidence_threshold:
+                  type: number
+                  format: float
+                  default: 0.75
+      responses:
+        '200':
+          description: Batch segmentation successful
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SegmentationResult'
+
+  /compute_uncertainty:
+    post:
+      summary: Compute uncertainty for segmentation logits
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                logits:
+                  type: array
+                  description: Raw model logits
+                masks:
+                  type: array
+                  description: Corresponding masks
+      responses:
+        '200':
+          description: Uncertainty computed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uncertainty_map:
+                    type: array
+                  uncertain_regions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UncertainRegion'

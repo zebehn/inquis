@@ -1,0 +1,78 @@
+# Configuration for Visual Perception Agent
+
+# SAM2 Segmentation Configuration
+sam2:
+  checkpoint: ./data/models/base/sam2_hiera_large.pt
+  config: sam2_hiera_l.yaml
+  device: cuda  # cuda, cpu, or mps
+  confidence_threshold: 0.75
+  uncertainty_threshold: 0.25
+
+# Z-Image Generation Configuration
+zimage:
+  model_path: ./data/models/base/zimage
+  model_variant: turbo  # turbo | base | edit
+  device: cuda
+  inference_steps: 8
+  quality_threshold: 0.7
+  num_images_per_label: 20
+
+# VLM Configuration
+vlm:
+  model: gpt-5.2
+  max_tokens: 300
+  temperature: 0.1
+  retry_max_attempts: 3
+  retry_backoff_factor: 2
+  prompt_template: "What object is in this image? Provide: 1) Specific label 2) Confidence 3) Reasoning"
+
+# Training Configuration
+training:
+  batch_size: 4
+  learning_rate: 0.0001
+  epochs: 5
+  lora_rank: 8
+  validation_split: 0.1
+  early_stopping_patience: 3
+
+# Storage Configuration
+storage:
+  data_dir: ./data
+  sessions_dir: ./data/sessions
+  models_dir: ./data/models
+  datasets_dir: ./data/datasets
+  max_session_size_gb: 50
+  cleanup_after_days: 30
+
+# Video Processing Configuration
+video:
+  max_duration_seconds: 600  # 10 minutes
+  min_fps: 15
+  max_fps: 60
+  supported_formats:
+    - mp4
+    - avi
+    - mov
+
+# Performance Configuration
+performance:
+  batch_process_frames: 4
+  max_concurrent_vlm_queries: 5
+  enable_mixed_precision: true
+  cache_embeddings: true
+  gpu_memory_fraction: 0.9
+
+# GUI Configuration
+gui:
+  title: "Visual Perception Agent"
+  layout: wide
+  theme: light
+  max_upload_size_mb: 500
+
+# Logging Configuration
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: ./logs/perception_agent.log
+  max_file_size_mb: 10
+  backup_count: 5

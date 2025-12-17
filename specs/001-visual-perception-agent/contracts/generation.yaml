@@ -1,0 +1,181 @@
+openapi: 3.0.0
+info:
+  title: Image Generation Service Contract
+  description: Interface for Z-Image synthetic training data generation
+  version: 1.0.0
+
+components:
+  schemas:
+    GenerationRequest:
+      type: object
+      required:
+        - label
+      properties:
+        label:
+          type: string
+          description: Object class label to generate
+        num_images:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+        model:
+          type: string
+          enum: ["z-image-turbo", "z-image-base"]
+          default: "z-image-turbo"
+        prompt_template:
+          type: string
+          default: "A photorealistic {label} in various lighting and backgrounds"
+        seed:
+          type: integer
+          nullable: true
+          description: Random seed for reproducibility
+        inference_steps:
+          type: integer
+          minimum: 4
+          maximum: 50
+          default: 8
+          description: Number of diffusion steps
+
+    GeneratedImage:
+      type: object
+      properties:
+        image:
+          type: string
+          format: byte
+          description: Base64-encoded generated image
+        mask:
+          type: array
+          description: Segmentation mask from re-segmentation
+          nullable: true
+        prompt:
+          type: string
+          description: Actual prompt used
+        seed:
+          type: integer
+        quality_score:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Quality metric (CLIP similarity)
+        generation_time:
+          type: number
+          format: float
+          description: Generation time in seconds
+
+    GenerationResult:
+      type: object
+      properties:
+        label:
+          type: string
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/GeneratedImage'
+        total_generation_time:
+          type: number
+          format: float
+        average_quality:
+          type: number
+          format: float
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        error_type:
+          type: string
+          enum: ["gpu_oom", "model_error", "invalid_input"]
+
+paths:
+  /generate:
+    post:
+      summary: Generate synthetic training images
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerationRequest'
+      responses:
+        '200':
+          description: Generation successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationResult'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Generation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /generate_with_mask:
+    post:
+      summary: Generate images and automatically create segmentation masks
+      description: Generates images then re-segments them with SAM2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/GenerationRequest'
+                - type: object
+                  properties:
+                    segmentation_service_url:
+                      type: string
+                      description: URL of segmentation service for mask generation
+      responses:
+        '200':
+          description: Generation with masks successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerationResult'
+
+  /quality_filter:
+    post:
+      summary: Filter generated images by quality threshold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                images:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/GeneratedImage'
+                quality_threshold:
+                  type: number
+                  format: float
+                  minimum: 0.0
+                  maximum: 1.0
+                  default: 0.7
+      responses:
+        '200':
+          description: Filtered images
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GeneratedImage'
+                  rejected:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GeneratedImage'

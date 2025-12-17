@@ -1,0 +1,169 @@
+openapi: 3.0.0
+info:
+  title: Vision-Language Model Service Contract
+  description: Interface for GPT-5.2 vision-language labeling
+  version: 1.0.0
+
+components:
+  schemas:
+    LabelRequest:
+      type: object
+      required:
+        - image
+        - prompt
+      properties:
+        image:
+          type: string
+          format: byte
+          description: Base64-encoded image crop
+        prompt:
+          type: string
+          description: Prompt template for labeling
+          default: "What object is in this image? Provide: 1) Specific label 2) Confidence 3) Reasoning"
+        model:
+          type: string
+          enum: ["gpt-5.2"]
+          default: "gpt-5.2"
+        max_tokens:
+          type: integer
+          minimum: 50
+          maximum: 500
+          default: 300
+
+    LabelResponse:
+      type: object
+      properties:
+        label:
+          type: string
+          description: Suggested object label
+        confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          nullable: true
+          description: VLM confidence (if provided)
+        reasoning:
+          type: string
+          description: Explanation from VLM
+        raw_response:
+          type: string
+          description: Full API response text
+        token_count:
+          type: integer
+          description: Tokens consumed
+        cost:
+          type: number
+          format: float
+          description: Estimated cost in USD
+        latency:
+          type: number
+          format: float
+          description: Query latency in seconds
+
+    BatchLabelRequest:
+      type: object
+      properties:
+        images:
+          type: array
+          items:
+            type: string
+            format: byte
+        prompt:
+          type: string
+          default: "What object is in this image? Provide: 1) Specific label 2) Confidence 3) Reasoning"
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        error_type:
+          type: string
+          enum: ["rate_limit", "api_error", "invalid_input", "timeout"]
+        retry_after:
+          type: integer
+          nullable: true
+          description: Seconds to wait before retry (for rate limits)
+
+paths:
+  /label_region:
+    post:
+      summary: Label a single uncertain region
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LabelRequest'
+      responses:
+        '200':
+          description: Labeling successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelResponse'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: API error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /label_batch:
+    post:
+      summary: Label multiple regions in batch
+      description: More efficient for multiple queries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchLabelRequest'
+      responses:
+        '200':
+          description: Batch labeling successful
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LabelResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      summary: Check VLM service health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: ["healthy", "degraded"]
+                  rate_limit_remaining:
+                    type: integer
+                  rate_limit_reset:
+                    type: string
+                    format: date-time

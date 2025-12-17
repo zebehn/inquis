@@ -208,3 +208,22 @@ __marimo__/
 
 # Specify
 .specify/
+
+# Project-specific: Visual Perception Agent
+# Large ML model files
+data/models/
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Video files and processed data
+data/sessions/
+data/datasets/
+*.mp4
+*.avi
+*.mov
+
+# Generated artifacts
+*.npz
+*.npy
