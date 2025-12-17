@@ -75,18 +75,18 @@
 - [x] T031 [US1] Implement VideoProcessor with frame extraction using OpenCV in src/services/video_processor.py
 - [x] T032 [US1] Implement SegmentationService with SAM2 model loading in src/services/segmentation_service.py
 - [x] T033 [US1] Implement SAM2 inference method (segment_frame) in src/services/segmentation_service.py
-- [ ] T034 [US1] Add VideoSession persistence methods to StorageService in src/services/storage_service.py
-- [ ] T035 [US1] Add SegmentationFrame persistence methods to StorageService in src/services/storage_service.py
-- [ ] T036 [US1] Create Streamlit app structure in src/gui/app.py
-- [ ] T037 [P] [US1] Implement video upload component in src/gui/components/video_viewer.py
-- [ ] T038 [P] [US1] Implement segmentation visualization component in src/gui/components/segmentation_viz.py
-- [ ] T039 [P] [US1] Implement visualization utilities (overlay masks, colors) in src/gui/utils/visualization.py
-- [ ] T040 [P] [US1] Implement Streamlit session state management in src/gui/utils/state_management.py
-- [ ] T041 [US1] Wire video upload → processing → display in src/gui/app.py
-- [ ] T042 [US1] Add frame navigation controls (prev/next) in src/gui/app.py
-- [ ] T043 [US1] Add progress bar and status display in src/gui/app.py
-- [ ] T044 [US1] Add error handling for invalid video formats in src/services/video_processor.py
-- [ ] T045 [US1] Add logging for video processing operations in src/services/video_processor.py
+- [x] T034 [US1] Add VideoSession persistence methods to StorageService in src/services/storage_service.py
+- [x] T035 [US1] Add SegmentationFrame persistence methods to StorageService in src/services/storage_service.py
+- [x] T036 [US1] Create Streamlit app structure in src/gui/app.py
+- [x] T037 [P] [US1] Implement video upload component in src/gui/components/video_viewer.py
+- [x] T038 [P] [US1] Implement segmentation visualization component in src/gui/components/segmentation_viz.py
+- [x] T039 [P] [US1] Implement visualization utilities (overlay masks, colors) in src/gui/utils/visualization.py
+- [x] T040 [P] [US1] Implement Streamlit session state management in src/gui/utils/state_management.py
+- [x] T041 [US1] Wire video upload → processing → display in src/gui/app.py
+- [x] T042 [US1] Add frame navigation controls (prev/next) in src/gui/app.py
+- [x] T043 [US1] Add progress bar and status display in src/gui/app.py
+- [x] T044 [US1] Add error handling for invalid video formats in src/services/video_processor.py
+- [x] T045 [US1] Add logging for video processing operations in src/services/video_processor.py
 
 **Checkpoint**: User Story 1 complete - can load video, segment, and view results
 

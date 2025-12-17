@@ -184,3 +184,81 @@ class StorageService:
         """
         session_path = self.get_session_path(session_id)
         return session_path / "masks"
+
+    def save_video_session(self, session: "VideoSession") -> None:
+        """Save VideoSession model to storage.
+
+        Args:
+            session: VideoSession model instance
+        """
+        from src.models.video_session import VideoSession
+
+        session_data = session.model_dump(mode='json')
+        self.save_metadata(str(session.id), "session.json", session_data)
+
+    def load_video_session(self, session_id: str) -> "VideoSession":
+        """Load VideoSession model from storage.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            VideoSession model instance
+        """
+        from src.models.video_session import VideoSession
+
+        session_data = self.load_metadata(session_id, "session.json")
+        return VideoSession(**session_data)
+
+    def save_segmentation_frame(
+        self, session_id: str, frame: "SegmentationFrame"
+    ) -> None:
+        """Save SegmentationFrame model to storage.
+
+        Args:
+            session_id: Session identifier
+            frame: SegmentationFrame model instance
+        """
+        from src.models.segmentation_frame import SegmentationFrame
+
+        frame_data = frame.model_dump(mode='json')
+        filename = f"frame_{frame.frame_index:06d}.json"
+        self.save_metadata(session_id, filename, frame_data)
+
+    def load_segmentation_frame(
+        self, session_id: str, frame_index: int
+    ) -> "SegmentationFrame":
+        """Load SegmentationFrame model from storage.
+
+        Args:
+            session_id: Session identifier
+            frame_index: Frame index
+
+        Returns:
+            SegmentationFrame model instance
+        """
+        from src.models.segmentation_frame import SegmentationFrame
+
+        filename = f"frame_{frame_index:06d}.json"
+        frame_data = self.load_metadata(session_id, filename)
+        return SegmentationFrame(**frame_data)
+
+    def list_segmentation_frames(self, session_id: str) -> List[int]:
+        """List all segmentation frame indices for a session.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            List of frame indices
+        """
+        session_path = self.get_session_path(session_id)
+        metadata_path = session_path / "metadata"
+
+        frame_indices = []
+        for file_path in metadata_path.glob("frame_*.json"):
+            # Extract frame index from filename like "frame_000042.json"
+            frame_idx = int(file_path.stem.split("_")[1])
+            frame_indices.append(frame_idx)
+
+        return sorted(frame_indices)

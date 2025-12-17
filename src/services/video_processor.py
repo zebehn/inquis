@@ -5,6 +5,9 @@ import numpy as np
 from pathlib import Path
 from typing import Iterator, Tuple, List
 from dataclasses import dataclass
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -46,12 +49,31 @@ class VideoProcessor:
 
         Raises:
             FileNotFoundError: If video file doesn't exist
+            ValueError: If video cannot be opened or is invalid
         """
         video_path = Path(video_path)
+
+        logger.info(f"Extracting metadata from video: {video_path}")
+
+        # Validate file exists
         if not video_path.exists():
+            logger.error(f"Video file not found: {video_path}")
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
+        # Validate file format
+        if not self.is_supported_format(video_path):
+            logger.error(f"Unsupported video format: {video_path.suffix}")
+            raise ValueError(
+                f"Unsupported video format: {video_path.suffix}. "
+                f"Supported formats: {self.supported_formats}"
+            )
+
         cap = cv2.VideoCapture(str(video_path))
+
+        if not cap.isOpened():
+            logger.error(f"Failed to open video file: {video_path}")
+            raise ValueError(f"Failed to open video file: {video_path}")
+
         try:
             # Extract properties
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -72,8 +94,35 @@ class VideoProcessor:
                 codec=codec.strip(),
             )
 
+            # Validate metadata
+            if frame_count <= 0:
+                logger.error(f"Invalid frame count: {frame_count}")
+                raise ValueError(f"Video has invalid frame count: {frame_count}")
+
+            if fps <= 0:
+                logger.error(f"Invalid FPS: {fps}")
+                raise ValueError(f"Video has invalid FPS: {fps}")
+
+            # Validate duration against max_duration
+            if duration > self.max_duration:
+                logger.warning(
+                    f"Video duration ({duration:.1f}s) exceeds maximum ({self.max_duration:.1f}s)"
+                )
+                raise ValueError(
+                    f"Video duration ({duration:.1f}s) exceeds maximum allowed "
+                    f"duration of {self.max_duration:.1f}s (10 minutes)"
+                )
+
+            logger.info(
+                f"Video metadata extracted: {frame_count} frames, "
+                f"{duration:.1f}s, {fps:.1f} FPS, {width}x{height}"
+            )
+
             return metadata
 
+        except Exception as e:
+            logger.error(f"Error extracting metadata: {str(e)}")
+            raise
         finally:
             cap.release()
 
@@ -89,27 +138,55 @@ class VideoProcessor:
 
         Raises:
             FileNotFoundError: If video file doesn't exist
-            ValueError: If frame_index is invalid
+            ValueError: If frame_index is invalid or frame cannot be read
         """
         video_path = Path(video_path)
+
+        logger.debug(f"Extracting frame {frame_index} from {video_path}")
+
         if not video_path.exists():
+            logger.error(f"Video file not found: {video_path}")
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
         cap = cv2.VideoCapture(str(video_path))
+
+        if not cap.isOpened():
+            logger.error(f"Failed to open video file: {video_path}")
+            raise ValueError(f"Failed to open video file: {video_path}")
+
         try:
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            # Validate frame index
+            if frame_index < 0 or frame_index >= total_frames:
+                logger.error(
+                    f"Invalid frame index {frame_index}. "
+                    f"Video has {total_frames} frames."
+                )
+                raise ValueError(
+                    f"Invalid frame index {frame_index}. "
+                    f"Must be between 0 and {total_frames - 1}"
+                )
+
             # Set frame position
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
 
             # Read frame
             ret, frame = cap.read()
-            if not ret:
+            if not ret or frame is None:
+                logger.error(f"Failed to read frame at index {frame_index}")
                 raise ValueError(f"Failed to read frame at index {frame_index}")
 
             # Convert BGR to RGB
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
+            logger.debug(f"Successfully extracted frame {frame_index}")
+
             return frame_rgb
 
+        except Exception as e:
+            logger.error(f"Error extracting frame {frame_index}: {str(e)}")
+            raise
         finally:
             cap.release()
 
