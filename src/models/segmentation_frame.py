@@ -12,10 +12,13 @@ class InstanceMask(BaseModel):
 
     Attributes:
         mask_path: Path to binary mask file (.npz)
-        class_label: Predicted class name
+        class_label: Predicted class name (from segmentation model)
         confidence: Prediction confidence [0, 1]
         bbox: Bounding box [x, y, width, height]
         area: Mask area in pixels
+        semantic_label: Optional VLM-provided semantic label (enhanced)
+        vlm_query_id: Optional reference to VLM query
+        semantic_label_source: Source of semantic label ("vlm", "manual", None)
     """
 
     mask_path: Path
@@ -23,6 +26,9 @@ class InstanceMask(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     bbox: List[int] = Field(min_length=4, max_length=4)
     area: int = Field(gt=0)
+    semantic_label: Optional[str] = None  # VLM-enhanced label
+    vlm_query_id: Optional[UUID] = None
+    semantic_label_source: Optional[str] = None  # "vlm", "manual", None
 
     @field_validator("confidence")
     @classmethod

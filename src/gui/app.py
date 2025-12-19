@@ -2,7 +2,21 @@
 
 import streamlit as st
 import sys
+import os
+import warnings
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Set PyTorch optimization environment variables
+os.environ['TORCH_CUDNN_SDPA_ENABLED'] = '1'
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
+
+# Filter out expected SAM2 attention warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='torch')
+warnings.filterwarnings('ignore', category=UserWarning, module='sam2')
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -20,18 +34,25 @@ from src.gui.components.video_viewer import (
     render_video_upload,
     render_video_info,
     render_frame_navigation,
+    render_frame_navigation_range,
 )
 from src.gui.components.segmentation_viz import (
     render_segmentation_view,
     render_visualization_controls,
     render_confidence_filter,
 )
+from src.gui.components.vlm_labeling import (
+    render_vlm_labeling_workflow,
+    render_vlm_statistics_dashboard,
+)
 from src.services.video_processor import VideoProcessor
 from src.services.segmentation_service import SegmentationService
 from src.services.storage_service import StorageService
+from src.services.vlm_service import VLMService
 from src.core.config import ConfigManager
 from src.utils.logging import setup_logging
 import numpy as np
+import os
 
 
 # Page configuration
@@ -69,6 +90,14 @@ def initialize_app():
             confidence_threshold=config.sam2.confidence_threshold,
         )
         st.session_state.storage = StorageService(base_dir=config.storage.sessions_dir)
+
+        # Initialize VLMService if API key is available
+        vlm_api_key = os.getenv("OPENAI_API_KEY")
+        if vlm_api_key:
+            st.session_state.vlm_service = VLMService(api_key=vlm_api_key)
+        else:
+            st.session_state.vlm_service = None
+
         st.session_state.config = config
         st.session_state.services_initialized = True
 
@@ -134,13 +163,21 @@ def process_video(video_path: Path):
         session_id = create_new_session()
         storage.create_session(session_id)
 
-        # Extract metadata
-        with st.spinner("📊 Extracting video metadata..."):
-            metadata = video_processor.extract_metadata(video_path)
-            set_state("video_metadata", metadata.model_dump() if hasattr(metadata, 'model_dump') else metadata.__dict__)
-            set_state("total_frames", metadata.frame_count)
+        # Get frame range from session state
+        metadata = get_state("video_metadata")
+        start_frame = get_state("start_frame", 0)
+        end_frame = get_state("end_frame", metadata["frame_count"] if metadata else None)
 
-        st.success(f"✅ Video loaded: {metadata.frame_count} frames")
+        # Validate frame range
+        if end_frame is None or end_frame > metadata["frame_count"]:
+            end_frame = metadata["frame_count"]
+
+        total_frames_to_process = end_frame - start_frame
+        set_state("total_frames", total_frames_to_process)
+        set_state("processed_start_frame", start_frame)
+        set_state("processed_end_frame", end_frame)
+
+        st.success(f"✅ Processing frames {start_frame} to {end_frame - 1} ({total_frames_to_process} frames)")
 
         # Process frames with progress bar
         progress_bar = st.progress(0.0)
@@ -148,11 +185,14 @@ def process_video(video_path: Path):
 
         segmentation_results = {}
 
-        for frame_idx, frame in enumerate(video_processor.extract_all_frames(video_path)):
+        for idx, frame in enumerate(video_processor.extract_frame_range(video_path, start_frame, end_frame)):
+            # Calculate actual frame index
+            frame_idx = start_frame + idx
+
             # Update progress
-            progress = (frame_idx + 1) / metadata.frame_count
+            progress = (idx + 1) / total_frames_to_process
             progress_bar.progress(progress)
-            status_text.text(f"Processing frame {frame_idx + 1}/{metadata.frame_count}")
+            status_text.text(f"Processing frame {frame_idx} ({idx + 1}/{total_frames_to_process})")
             update_progress(progress)
 
             # Save frame
@@ -176,7 +216,7 @@ def process_video(video_path: Path):
 
         progress_bar.empty()
         status_text.empty()
-        st.success(f"✅ Processing complete! Processed {metadata.frame_count} frames.")
+        st.success(f"✅ Processing complete! Processed {total_frames_to_process} frames (frames {start_frame}-{end_frame - 1}).")
 
     except Exception as e:
         set_error(f"Error processing video: {str(e)}")
@@ -194,6 +234,53 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
     video_path = render_video_upload()
 
     if video_path is not None and not get_state("video_uploaded"):
+        # Extract metadata if not already extracted
+        metadata = get_state("video_metadata")
+        if not metadata:
+            with st.spinner("📊 Extracting video metadata..."):
+                video_processor = st.session_state.video_processor
+                metadata = video_processor.extract_metadata(video_path)
+                set_state("video_metadata", metadata.model_dump() if hasattr(metadata, 'model_dump') else metadata.__dict__)
+                st.success(f"✅ Video loaded: {metadata.frame_count} frames")
+                st.rerun()
+
+        # Show frame range inputs if video metadata is available
+        if metadata:
+            st.subheader("⚙️ Processing Options")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                start_frame = st.number_input(
+                    "Start Frame",
+                    min_value=0,
+                    max_value=metadata["frame_count"] - 1,
+                    value=0,
+                    step=1,
+                    help="First frame to process (0-indexed)",
+                )
+
+            with col2:
+                end_frame = st.number_input(
+                    "End Frame",
+                    min_value=start_frame + 1,
+                    max_value=metadata["frame_count"],
+                    value=min(start_frame + 100, metadata["frame_count"]),
+                    step=1,
+                    help="Last frame to process (exclusive)",
+                )
+
+            # Calculate and display frame range info
+            num_frames = end_frame - start_frame
+            duration = num_frames / metadata["fps"]
+            st.info(f"📊 Will process {num_frames} frames (~{duration:.1f} seconds)")
+
+            # Store frame range in session state
+            set_state("start_frame", start_frame)
+            set_state("end_frame", end_frame)
+
+            st.divider()
+
         if st.button("🚀 Start Processing", type="primary"):
             process_video(video_path)
 
@@ -206,10 +293,16 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
     # Show results if video is processed
     if get_state("video_uploaded"):
         # Frame navigation
-        current_frame = get_state("current_frame_index", 0)
-        total_frames = get_state("total_frames", 1)
+        start_frame = get_state("processed_start_frame", 0)
+        end_frame = get_state("processed_end_frame", 1)
+        current_frame = get_state("current_frame_index", start_frame)
 
-        frame_index = render_frame_navigation(current_frame, total_frames)
+        # Ensure current frame is within processed range
+        if current_frame < start_frame or current_frame >= end_frame:
+            current_frame = start_frame
+            set_state("current_frame_index", current_frame)
+
+        frame_index = render_frame_navigation_range(current_frame, start_frame, end_frame)
         set_state("current_frame_index", frame_index)
 
         st.divider()
@@ -224,6 +317,12 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
             # Get segmentation results
             segmentation_results = get_state("segmentation_results", {})
             frame_result = segmentation_results.get(frame_index)
+
+            # Load VLM labels (uncertain regions) for this frame
+            try:
+                uncertain_regions = storage.load_uncertain_regions_by_frame(session_id, frame_index)
+            except Exception:
+                uncertain_regions = []
 
             # Filter by confidence if results exist
             if frame_result and len(frame_result["confidences"]) > 0:
@@ -244,7 +343,7 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
                         ],
                     }
 
-            # Render segmentation view
+            # Render segmentation view with VLM labels
             render_segmentation_view(
                 frame,
                 frame_result,
@@ -252,10 +351,40 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
                 show_bboxes=viz_settings["show_bboxes"],
                 show_labels=viz_settings["show_labels"],
                 alpha=viz_settings["alpha"],
+                uncertain_regions=uncertain_regions,
             )
 
         except Exception as e:
             st.error(f"❌ Error loading frame: {str(e)}")
+
+        # VLM Labeling Section
+        st.divider()
+
+        # Check if VLM service is available
+        vlm_service = st.session_state.get("vlm_service")
+        if vlm_service:
+            # Load uncertain regions for this session
+            try:
+                region_ids = storage.list_uncertain_regions(session_id)
+                uncertain_regions = [
+                    storage.load_uncertain_region(session_id, region_id)
+                    for region_id in region_ids
+                ]
+
+                # Render VLM labeling workflow
+                render_vlm_labeling_workflow(
+                    uncertain_regions=uncertain_regions,
+                    session_id=session_id,
+                    vlm_service=vlm_service,
+                    storage_service=storage,
+                )
+
+            except Exception as e:
+                st.error(f"❌ Error loading uncertain regions: {str(e)}")
+        else:
+            st.warning(
+                "⚠️ VLM service not available. Set OPENAI_API_KEY environment variable to enable VLM-assisted labeling."
+            )
 
 
 def main():

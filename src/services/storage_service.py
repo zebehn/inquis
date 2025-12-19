@@ -424,6 +424,34 @@ class StorageService:
 
         return sorted(region_ids)
 
+    def load_uncertain_regions_by_frame(
+        self, session_id: str, frame_index: int
+    ) -> List["UncertainRegion"]:
+        """Load all uncertain regions for a specific frame.
+
+        Args:
+            session_id: Session identifier
+            frame_index: Frame index
+
+        Returns:
+            List of UncertainRegion objects for the frame
+        """
+        from src.models.uncertain_region import UncertainRegion
+
+        region_ids = self.list_uncertain_regions(session_id)
+        frame_regions = []
+
+        for region_id in region_ids:
+            try:
+                region = self.load_uncertain_region(session_id, region_id)
+                if region.frame_index == frame_index:
+                    frame_regions.append(region)
+            except Exception:
+                # Skip regions that fail to load
+                continue
+
+        return frame_regions
+
     # T087-T089: VLM Query persistence and semantic label replacement
     def save_vlm_query(self, session_id: str, query: "VLMQuery") -> None:
         """Save VLMQuery to session metadata.
