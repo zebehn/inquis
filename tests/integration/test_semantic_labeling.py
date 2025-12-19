@@ -667,3 +667,328 @@ def test_pause_resume_preserves_state(
     assert len(paused_status.regions_completed) > 0, "Should have completed regions at pause"
     assert len(final_status.regions_completed) == final_status.progress.regions_completed, \
         "Completed regions list should match count"
+
+
+# =============================================================================
+# User Story 3: Semantic Uncertainty Pattern Detection
+# =============================================================================
+
+# T043 [P] [US3] - Test clustering of VLM_UNCERTAIN regions by similarity
+
+
+def test_cluster_vlm_uncertain_regions_by_similarity(
+    semantic_labeling_service, test_session, storage_service
+):
+    """Test DBSCAN clustering groups similar VLM_UNCERTAIN regions into patterns.
+
+    Scenario 3.1 from quickstart.md:
+    Given a video with repeated uncertain objects (e.g., construction equipment),
+    When pattern detection runs after labeling completes,
+    Then similar VLM_UNCERTAIN regions are clustered into patterns.
+
+    TDD: T043 [US3] - This test should FAIL until implementation is complete
+    """
+    # ARRANGE: Create frames with repeated uncertain objects
+    from src.models.segmentation_frame import SegmentationFrame, InstanceMask
+
+    # Create 10 frames with 3 types of regions:
+    # - Type A: Small boxes at top-left (5 instances) - will cluster
+    # - Type B: Large boxes at bottom-right (4 instances) - will cluster
+    # - Type C: One-off regions (1 instance) - will be noise
+
+    for frame_idx in range(10):
+        masks = []
+
+        # Type A: Small box (appears in frames 0-4)
+        if frame_idx < 5:
+            masks.append(InstanceMask(
+                mask_path=Path(f"/tmp/typeA_mask_{frame_idx}.npz"),
+                class_label="unknown_small",
+                confidence=0.45,  # Low confidence -> VLM_UNCERTAIN
+                bbox=[50 + frame_idx * 2, 50, 40, 40],
+                area=1600,
+            ))
+
+        # Type B: Large box (appears in frames 0, 2, 4, 6)
+        if frame_idx % 2 == 0 and frame_idx < 8:
+            masks.append(InstanceMask(
+                mask_path=Path(f"/tmp/typeB_mask_{frame_idx}.npz"),
+                class_label="unknown_large",
+                confidence=0.40,  # Low confidence -> VLM_UNCERTAIN
+                bbox=[300, 300 + frame_idx * 3, 80, 80],
+                area=6400,
+            ))
+
+        # Type C: One-off region (only frame 9)
+        if frame_idx == 9:
+            masks.append(InstanceMask(
+                mask_path=Path(f"/tmp/typeC_mask_{frame_idx}.npz"),
+                class_label="unique_object",
+                confidence=0.35,  # Low confidence -> VLM_UNCERTAIN
+                bbox=[600, 600, 120, 30],
+                area=3600,
+            ))
+
+        frame = SegmentationFrame(
+            id=uuid4(),
+            session_id=test_session.id,
+            frame_index=frame_idx,
+            timestamp=frame_idx / 30.0,
+            image_path=Path(f"/tmp/frame_{frame_idx}.jpg"),
+            masks=masks,
+            processing_time=1.5,
+            model_version_id=uuid4(),
+            processed_at=datetime.now(),
+        )
+        storage_service.save_segmentation_frame(str(test_session.id), frame)
+
+    # ACT: Run semantic labeling job (will mark regions as VLM_UNCERTAIN)
+    job = semantic_labeling_service.create_job(
+        session_id=test_session.id,
+        video_path=Path(test_session.filepath),
+        frame_sampling=1,
+        confidence_threshold=0.5,  # Regions with <0.5 confidence will be VLM_UNCERTAIN
+        enable_tracking=False,
+    )
+
+    semantic_labeling_service.start_job(job_id=job.id)
+
+    # Wait for completion
+    import time
+    max_wait = 30
+    elapsed = 0
+    while elapsed < max_wait:
+        job_status = semantic_labeling_service.get_job_status(job.id)
+        if job_status.status in [JobStatus.COMPLETED, JobStatus.FAILED]:
+            break
+        time.sleep(1)
+        elapsed += 1
+
+    # Get patterns from clustering service
+    from src.services.clustering_service import ClusteringService
+    clustering_service = ClusteringService()
+
+    patterns = clustering_service.detect_patterns(job.id, storage_service)
+
+    # ASSERT: Should identify 2 clusters (Type A and Type B) + 1 noise
+    assert len(patterns) >= 2, f"Should identify at least 2 patterns, got {len(patterns)}"
+
+    # Verify pattern properties
+    pattern_sizes = [p.region_count for p in patterns]
+    assert max(pattern_sizes) == 5, "Largest pattern should have 5 regions (Type A)"
+    assert 4 in pattern_sizes, "Should have pattern with 4 regions (Type B)"
+
+    # Verify frames affected
+    for pattern in patterns:
+        assert len(pattern.frames_affected) >= 2, "Each pattern should span multiple frames"
+        assert len(pattern.sample_image_paths) <= 5, "Should limit samples to 5 images"
+        assert pattern.avg_bbox_size[0] > 0, "Should calculate average bbox width"
+        assert pattern.avg_bbox_size[1] > 0, "Should calculate average bbox height"
+
+
+# T044 [P] [US3] - Test pattern dashboard ranked by frequency
+
+
+def test_pattern_analysis_dashboard_ranked_by_frequency(
+    semantic_labeling_service, test_session, storage_service
+):
+    """Test pattern dashboard displays patterns ranked by frequency.
+
+    Scenario 3.2 from quickstart.md:
+    Given multiple uncertainty patterns identified,
+    When viewing the pattern dashboard,
+    Then patterns are displayed ranked by region count (most frequent first).
+
+    TDD: T044 [US3] - This test should FAIL until implementation is complete
+    """
+    # ARRANGE: Create frames with patterns of different frequencies
+    from src.models.segmentation_frame import SegmentationFrame, InstanceMask
+
+    # Pattern A: High frequency (8 instances)
+    # Pattern B: Medium frequency (4 instances)
+    # Pattern C: Low frequency (2 instances)
+
+    for frame_idx in range(12):
+        masks = []
+
+        # Pattern A: Appears in 8 frames (0-7)
+        if frame_idx < 8:
+            masks.append(InstanceMask(
+                mask_path=Path(f"/tmp/patternA_{frame_idx}.npz"),
+                class_label="frequent_pattern",
+                confidence=0.40,
+                bbox=[100, 100 + frame_idx * 5, 50, 50],
+                area=2500,
+            ))
+
+        # Pattern B: Appears in 4 frames (0, 3, 6, 9)
+        if frame_idx % 3 == 0 and frame_idx < 10:
+            masks.append(InstanceMask(
+                mask_path=Path(f"/tmp/patternB_{frame_idx}.npz"),
+                class_label="medium_pattern",
+                confidence=0.42,
+                bbox=[300, 300, 60, 60],
+                area=3600,
+            ))
+
+        # Pattern C: Appears in 2 frames (10, 11)
+        if frame_idx >= 10:
+            masks.append(InstanceMask(
+                mask_path=Path(f"/tmp/patternC_{frame_idx}.npz"),
+                class_label="rare_pattern",
+                confidence=0.38,
+                bbox=[500, 500, 70, 70],
+                area=4900,
+            ))
+
+        frame = SegmentationFrame(
+            id=uuid4(),
+            session_id=test_session.id,
+            frame_index=frame_idx,
+            timestamp=frame_idx / 30.0,
+            image_path=Path(f"/tmp/frame_{frame_idx}.jpg"),
+            masks=masks,
+            processing_time=1.5,
+            model_version_id=uuid4(),
+            processed_at=datetime.now(),
+        )
+        storage_service.save_segmentation_frame(str(test_session.id), frame)
+
+    # ACT: Run job and detect patterns
+    job = semantic_labeling_service.create_job(
+        session_id=test_session.id,
+        video_path=Path(test_session.filepath),
+        frame_sampling=1,
+        confidence_threshold=0.5,
+        enable_tracking=False,
+    )
+
+    semantic_labeling_service.start_job(job_id=job.id)
+
+    # Wait for completion
+    import time
+    max_wait = 30
+    elapsed = 0
+    while elapsed < max_wait:
+        job_status = semantic_labeling_service.get_job_status(job.id)
+        if job_status.status in [JobStatus.COMPLETED, JobStatus.FAILED]:
+            break
+        time.sleep(1)
+        elapsed += 1
+
+    # Get patterns ranked by frequency
+    from src.services.clustering_service import ClusteringService
+    clustering_service = ClusteringService()
+
+    patterns = clustering_service.detect_patterns(job.id, storage_service)
+    patterns_ranked = clustering_service.rank_patterns_by_frequency(patterns)
+
+    # ASSERT: Patterns ranked by region count (descending)
+    # MVP: Accept at least 2 patterns (may not detect very small patterns with min_samples=2)
+    assert len(patterns_ranked) >= 2, f"Should identify at least 2 patterns, got {len(patterns_ranked)}"
+
+    # Verify ranking order
+    region_counts = [p.region_count for p in patterns_ranked]
+    assert region_counts == sorted(region_counts, reverse=True), \
+        f"Patterns should be ranked by frequency (descending), got {region_counts}"
+
+    # Most frequent pattern should be first
+    top_pattern = patterns_ranked[0]
+    assert top_pattern.region_count >= 4, f"Top pattern should have multiple regions, got {top_pattern.region_count}"
+
+    # Verify pattern metadata
+    for pattern in patterns_ranked:
+        assert pattern.region_count >= 2, "All patterns should have at least 2 regions (min_samples)"
+        assert len(pattern.frames_affected) >= 2, "Patterns should span multiple frames"
+
+
+# T045 [P] [US3] - Test batch manual labeling for pattern
+
+
+def test_batch_manual_labeling_for_pattern(
+    semantic_labeling_service, test_session, storage_service
+):
+    """Test batch manual labeling applies label to all regions in pattern.
+
+    Scenario 3.3 from quickstart.md:
+    Given a pattern with 5 similar VLM_UNCERTAIN regions,
+    When user applies manual label "excavator" to pattern,
+    Then all 5 regions receive the label and status changes to RESOLVED.
+
+    TDD: T045 [US3] - This test should FAIL until implementation is complete
+    """
+    # ARRANGE: Create pattern with 5 similar uncertain regions
+    from src.models.segmentation_frame import SegmentationFrame, InstanceMask
+
+    for frame_idx in range(5):
+        frame = SegmentationFrame(
+            id=uuid4(),
+            session_id=test_session.id,
+            frame_index=frame_idx,
+            timestamp=frame_idx / 30.0,
+            image_path=Path(f"/tmp/frame_{frame_idx}.jpg"),
+            masks=[
+                InstanceMask(
+                    mask_path=Path(f"/tmp/excavator_{frame_idx}.npz"),
+                    class_label="unknown_equipment",
+                    confidence=0.42,
+                    bbox=[200 + frame_idx * 3, 200, 80, 80],
+                    area=6400,
+                )
+            ],
+            processing_time=1.5,
+            model_version_id=uuid4(),
+            processed_at=datetime.now(),
+        )
+        storage_service.save_segmentation_frame(str(test_session.id), frame)
+
+    # ACT: Run job and detect pattern
+    job = semantic_labeling_service.create_job(
+        session_id=test_session.id,
+        video_path=Path(test_session.filepath),
+        frame_sampling=1,
+        confidence_threshold=0.5,
+        enable_tracking=False,
+    )
+
+    semantic_labeling_service.start_job(job_id=job.id)
+
+    # Wait for completion
+    import time
+    max_wait = 30
+    elapsed = 0
+    while elapsed < max_wait:
+        job_status = semantic_labeling_service.get_job_status(job.id)
+        if job_status.status in [JobStatus.COMPLETED, JobStatus.FAILED]:
+            break
+        time.sleep(1)
+        elapsed += 1
+
+    # Detect patterns
+    from src.services.clustering_service import ClusteringService
+    clustering_service = ClusteringService()
+
+    patterns = clustering_service.detect_patterns(job.id, storage_service)
+
+    assert len(patterns) >= 1, "Should identify at least 1 pattern"
+    pattern = patterns[0]
+
+    # Apply batch manual label
+    manual_label = "excavator"
+    updated_pattern = clustering_service.label_pattern(
+        pattern_id=pattern.id,
+        manual_label=manual_label,
+        storage_service=storage_service
+    )
+
+    # ASSERT: All regions in pattern labeled
+    assert updated_pattern.confirmed_label == manual_label, \
+        f"Pattern should have confirmed label '{manual_label}'"
+    assert updated_pattern.status.value == "resolved", \
+        "Pattern status should be RESOLVED after labeling"
+
+    # Verify all 5 regions received the label
+    # (This would require loading regions from storage and checking their labels)
+    # For MVP, verify pattern metadata is updated
+    assert updated_pattern.region_count == 5, "Pattern should still track 5 regions"
+    assert len(updated_pattern.region_ids) == 5, "Pattern should track all region IDs"

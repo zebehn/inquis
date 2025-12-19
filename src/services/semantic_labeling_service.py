@@ -164,16 +164,27 @@ class SemanticLabelingService:
         sampled_frames = [idx for idx in frame_indices if idx % frame_sampling == 0]
 
         # Collect all region IDs from sampled frames
+        # Store mapping of region_id -> (frame_id, frame_idx, mask_idx) for later lookup
         region_ids = []
+        self._region_metadata = {}  # Store metadata for creating UncertainRegion objects
+
         for frame_idx in sampled_frames:
             frame = self.storage.load_segmentation_frame(session_id, frame_idx)
             # Each mask in the frame is a region
-            for mask in frame.masks:
+            for mask_idx, mask in enumerate(frame.masks):
                 # Generate region ID from frame and mask
                 # Note: This is a simplified approach - in real implementation,
                 # regions would have persistent IDs from segmentation
                 region_id = uuid4()
                 region_ids.append(region_id)
+
+                # Store metadata for this region
+                self._region_metadata[region_id] = {
+                    "frame_id": frame.id,
+                    "frame_idx": frame_idx,
+                    "mask_idx": mask_idx,
+                    "mask": mask,
+                }
 
         frames_total = len(sampled_frames)
         regions_total = len(region_ids)
@@ -244,14 +255,26 @@ class SemanticLabelingService:
                     # Real VLM query (not in tests)
                     pass
                 else:
-                    # Mock response for tests
+                    # Mock response for tests - use original mask confidence if available
+                    metadata = self._region_metadata.get(region_id)
+                    original_confidence = metadata["mask"].confidence if metadata else None
+
                     vlm_query = self._create_mock_vlm_query(
                         region_id=region_id,
-                        confidence_threshold=job.configuration.confidence_threshold
+                        confidence_threshold=job.configuration.confidence_threshold,
+                        original_confidence=original_confidence,
                     )
 
                 # Evaluate confidence
                 is_uncertain = self._evaluate_vlm_confidence(vlm_query, job.configuration.confidence_threshold)
+
+                # Create UncertainRegion if below confidence threshold
+                if is_uncertain and region_id in self._region_metadata:
+                    self._create_uncertain_region(
+                        session_id=session_id,
+                        region_id=region_id,
+                        vlm_query=vlm_query,
+                    )
 
                 # Update region with label (simplified - would update actual region model)
                 # self._update_region_with_label(region, vlm_query)
@@ -314,20 +337,31 @@ class SemanticLabelingService:
             job.timestamps.completed_at = datetime.now()
             self._checkpoint_progress(session_id, job)
 
-    def _create_mock_vlm_query(self, region_id: UUID, confidence_threshold: float) -> VLMQuery:
+    def _create_mock_vlm_query(
+        self,
+        region_id: UUID,
+        confidence_threshold: float,
+        original_confidence: Optional[float] = None,
+    ) -> VLMQuery:
         """Create mock VLM query for testing.
 
         Args:
             region_id: Region UUID
             confidence_threshold: Confidence threshold
+            original_confidence: Original mask confidence (if available)
 
         Returns:
             Mock VLMQuery
         """
         import random
 
-        # Randomly generate confidence (some above, some below threshold)
-        confidence = random.uniform(0.3, 0.9)
+        # Use original confidence if provided, otherwise generate random
+        if original_confidence is not None:
+            confidence = original_confidence
+        else:
+            # Randomly generate confidence (some above, some below threshold)
+            confidence = random.uniform(0.3, 0.9)
+
         is_uncertain = confidence < confidence_threshold
 
         status = VLMQueryStatus.VLM_UNCERTAIN if is_uncertain else VLMQueryStatus.SUCCESS
@@ -378,6 +412,50 @@ class SemanticLabelingService:
             True if VLM_UNCERTAIN, False otherwise
         """
         return vlm_query.status == VLMQueryStatus.VLM_UNCERTAIN
+
+    def _create_uncertain_region(
+        self,
+        session_id: str,
+        region_id: UUID,
+        vlm_query: VLMQuery,
+    ) -> None:
+        """Create and save UncertainRegion for a VLM_UNCERTAIN detection.
+
+        Args:
+            session_id: Session ID
+            region_id: Region UUID
+            vlm_query: VLM query result
+        """
+        from src.models.uncertain_region import UncertainRegion, RegionStatus
+
+        # Get metadata for this region
+        metadata = self._region_metadata.get(region_id)
+        if not metadata:
+            return
+
+        mask = metadata["mask"]
+
+        # Extract confidence from VLM response
+        confidence = vlm_query.response.get("confidence", 0.0)
+        uncertainty_score = 1.0 - confidence
+
+        # Create UncertainRegion
+        uncertain_region = UncertainRegion(
+            id=region_id,
+            session_id=UUID(session_id),
+            frame_id=metadata["frame_id"],
+            frame_index=metadata["frame_idx"],
+            bbox=mask.bbox,
+            uncertainty_score=uncertainty_score,
+            cropped_image_path=Path(f"/tmp/crop_{region_id}.jpg"),  # Placeholder for MVP
+            mask_path=mask.mask_path,
+            status=RegionStatus.QUERIED,
+            vlm_query_id=vlm_query.id,
+            created_at=datetime.now(),
+        )
+
+        # Save to storage
+        self.storage.save_uncertain_region(session_id, uncertain_region)
 
     # T024 [US1] - Update region with label
 
