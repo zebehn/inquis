@@ -101,6 +101,7 @@ class SemanticLabelingJob(BaseModel):
     video_path: Path
     status: JobStatus
     error_message: Optional[str] = None
+    pause_reason: Optional[str] = None
 
     # Progress and tracking
     progress: JobProgress

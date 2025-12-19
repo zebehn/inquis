@@ -52,8 +52,8 @@ class VLMService:
     # GPT-5.2 pricing (example rates - adjust based on actual API pricing)
     PRICING = {
         "gpt-5.2": {
-            "input": 0.00001,  # $0.01 per 1K input tokens
-            "output": 0.00003,  # $0.03 per 1K output tokens
+            "input": 0.01,  # $0.01 per 1K input tokens
+            "output": 0.03,  # $0.03 per 1K output tokens
         }
     }
 
