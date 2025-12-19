@@ -1,0 +1,685 @@
+openapi: 3.0.3
+info:
+  title: Semantic Labeling API
+  description: |
+    API for automatic VLM-based semantic labeling of all segmented regions with cost controls,
+    region tracking optimization, and semantic uncertainty pattern detection.
+
+    **Feature**: 002-semantic-labeling-all-regions
+    **Date**: 2025-12-19
+  version: 1.0.0
+  contact:
+    name: Inquis Development Team
+
+servers:
+  - url: http://localhost:8501/api/v1
+    description: Local Streamlit server
+
+tags:
+  - name: Jobs
+    description: Labeling job lifecycle management
+  - name: Estimation
+    description: Cost estimation before processing
+  - name: Patterns
+    description: Semantic uncertainty pattern detection
+
+paths:
+  # ==================== Job Management ====================
+
+  /jobs:
+    post:
+      summary: Create new labeling job
+      description: |
+        Creates a new semantic labeling job for automatic VLM querying of all segmented regions.
+        Job is created in PENDING status - call /jobs/{id}/start to begin processing.
+
+        **Functional Requirements**: FR-001, FR-004, FR-011
+      tags: [Jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobRequest'
+      responses:
+        '201':
+          description: Job created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /jobs/{jobId}:
+    get:
+      summary: Get job status and progress
+      description: |
+        Retrieves current job status, progress metrics, and cost tracking information.
+        Use for real-time monitoring during processing.
+
+        **Functional Requirements**: FR-005
+      tags: [Jobs]
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /jobs/{jobId}/start:
+    post:
+      summary: Start job execution
+      description: |
+        Begins processing regions for the specified job. Job must be in PENDING status.
+        Processing happens asynchronously - use GET /jobs/{id} to monitor progress.
+
+        **Functional Requirements**: FR-001, FR-007
+      tags: [Jobs]
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job started successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '400':
+          description: Job not in startable state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /jobs/{jobId}/pause:
+    post:
+      summary: Pause job execution
+      description: |
+        Pauses job execution after current VLM query completes (1-5 seconds).
+        All progress and state is checkpointed atomically. Job can be resumed later.
+
+        **Functional Requirements**: FR-008
+      tags: [Jobs]
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Pause requested, will complete after current query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '400':
+          description: Job not in pausable state (not RUNNING)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /jobs/{jobId}/resume:
+    post:
+      summary: Resume paused job
+      description: |
+        Resumes a paused job from last checkpoint. Rebuilds pending region queue
+        idempotently and continues processing.
+
+        **Functional Requirements**: FR-008
+      tags: [Jobs]
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job resumed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '400':
+          description: Job not in resumable state (not PAUSED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /jobs/{jobId}/cancel:
+    post:
+      summary: Cancel job execution
+      description: |
+        Cancels job execution. Current VLM query completes, then job transitions to CANCELLED.
+        Completed work is preserved but remaining regions are not processed.
+      tags: [Jobs]
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== Cost Estimation ====================
+
+  /jobs/{jobId}/estimate:
+    post:
+      summary: Estimate total VLM cost
+      description: |
+        Performs stratified frame sampling (15-20% of frames) to estimate total VLM cost
+        before processing. Accounts for region tracking optimization.
+        Returns estimated cost with 95% confidence interval.
+
+        **Functional Requirements**: FR-002
+        **Processing Time**: 15-30 seconds
+      tags: [Estimation]
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Cost estimate computed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CostEstimate'
+        '400':
+          description: Job already started (cannot estimate after processing begins)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== Pattern Detection ====================
+
+  /jobs/{jobId}/patterns:
+    get:
+      summary: List semantic uncertainty patterns
+      description: |
+        Retrieves clusters of visually similar VLM_UNCERTAIN regions identified by DBSCAN.
+        Patterns enable batch manual labeling and identification of systematic VLM struggles.
+
+        **Functional Requirements**: FR-006
+        **Note**: Patterns are computed on-demand when this endpoint is called (may take 30-105 seconds for 100+ uncertain regions).
+      tags: [Patterns]
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - name: minRegions
+          in: query
+          description: Minimum regions per pattern (default 2)
+          schema:
+            type: integer
+            minimum: 2
+            default: 2
+        - name: eps
+          in: query
+          description: DBSCAN similarity threshold (default 0.3)
+          schema:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+            default: 0.3
+      responses:
+        '200':
+          description: Patterns retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  patterns:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Pattern'
+                  total_patterns:
+                    type: integer
+                  total_uncertain_regions:
+                    type: integer
+                  clustering_time_seconds:
+                    type: number
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /patterns/{patternId}/label:
+    post:
+      summary: Apply batch label to pattern
+      description: |
+        Applies manual semantic label to all regions in the pattern. Updates all regions
+        to status CONFIRMED with the provided label. Marks pattern as resolved.
+
+        **Functional Requirements**: FR-010
+      tags: [Patterns]
+      parameters:
+        - name: patternId
+          in: path
+          required: true
+          description: UUID of the semantic uncertainty pattern
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  description: Semantic label to apply to all regions in pattern
+                  example: "construction_equipment"
+      responses:
+        '200':
+          description: Label applied successfully to all regions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pattern:
+                    $ref: '#/components/schemas/Pattern'
+                  regions_updated:
+                    type: integer
+                    description: Number of regions updated with label
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ==================== Components ====================
+
+components:
+  parameters:
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      description: UUID of the semantic labeling job
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    # ========== Request Schemas ==========
+
+    CreateJobRequest:
+      type: object
+      required:
+        - session_id
+        - video_path
+      properties:
+        session_id:
+          type: string
+          format: uuid
+          description: UUID of the video session to process
+        video_path:
+          type: string
+          format: path
+          description: Absolute path to video file
+          example: "/data/videos/dashcam.mp4"
+        budget_limit:
+          type: number
+          format: float
+          minimum: 0
+          description: Maximum VLM cost in USD (optional, for FR-003)
+          example: 10.00
+        frame_sampling:
+          type: integer
+          minimum: 1
+          default: 1
+          description: Process every Nth frame (1=all frames, 5=every 5th frame for FR-004)
+          example: 1
+        confidence_threshold:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          default: 0.5
+          description: VLM confidence threshold for VLM_UNCERTAIN detection
+          example: 0.5
+        enable_tracking:
+          type: boolean
+          default: true
+          description: Enable region tracking optimization (FR-011)
+        tracking_iou_threshold:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          default: 0.7
+          description: IoU threshold for region tracking (FR-011)
+          example: 0.7
+
+    # ========== Response Schemas ==========
+
+    JobResponse:
+      type: object
+      required:
+        - id
+        - session_id
+        - status
+        - progress
+        - cost_tracking
+        - configuration
+        - timestamps
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique job identifier
+        session_id:
+          type: string
+          format: uuid
+          description: Associated video session ID
+        video_path:
+          type: string
+          format: path
+          description: Path to video file
+        status:
+          type: string
+          enum: [pending, running, paused, paused_budget_limit, completed, failed, cancelled]
+          description: Current job status
+        error_message:
+          type: string
+          nullable: true
+          description: Error message if status=failed
+        progress:
+          type: object
+          properties:
+            frames_total:
+              type: integer
+              description: Total frames to process
+            frames_processed:
+              type: integer
+              description: Frames completed
+            frames_pending:
+              type: integer
+              description: Frames remaining
+            regions_total:
+              type: integer
+              description: Total regions to label
+            regions_completed:
+              type: integer
+              description: Regions successfully labeled
+            regions_pending:
+              type: integer
+              description: Regions awaiting VLM query
+            regions_failed:
+              type: integer
+              description: Regions with VLM failures (FR-009)
+            progress_percentage:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 100
+              description: Overall completion percentage
+        cost_tracking:
+          type: object
+          properties:
+            total_cost:
+              type: number
+              format: float
+              description: Cumulative VLM cost in USD (FR-005)
+            total_tokens:
+              type: integer
+              description: Cumulative tokens consumed
+            budget_limit:
+              type: number
+              format: float
+              nullable: true
+              description: Budget limit if set (FR-003)
+            budget_consumed_percentage:
+              type: number
+              format: float
+              description: Percentage of budget consumed
+            queries_successful:
+              type: integer
+              description: Successful VLM queries
+            queries_failed:
+              type: integer
+              description: Failed VLM queries (FR-009)
+            queries_uncertain:
+              type: integer
+              description: VLM_UNCERTAIN queries (FR-009)
+            average_cost_per_region:
+              type: number
+              format: float
+              description: Average cost per region
+            estimated_remaining_cost:
+              type: number
+              format: float
+              nullable: true
+              description: Estimated cost to complete
+        configuration:
+          type: object
+          properties:
+            frame_sampling:
+              type: integer
+              description: Frame sampling rate (FR-004)
+            confidence_threshold:
+              type: number
+              format: float
+              description: VLM confidence threshold
+            model_name:
+              type: string
+              description: VLM model used
+            enable_tracking:
+              type: boolean
+              description: Region tracking enabled (FR-011)
+            tracking_iou_threshold:
+              type: number
+              format: float
+              description: IoU threshold for tracking
+        timestamps:
+          type: object
+          properties:
+            created_at:
+              type: string
+              format: date-time
+            started_at:
+              type: string
+              format: date-time
+              nullable: true
+            paused_at:
+              type: string
+              format: date-time
+              nullable: true
+            resumed_at:
+              type: string
+              format: date-time
+              nullable: true
+            completed_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    CostEstimate:
+      type: object
+      required:
+        - estimated_cost
+        - min_cost
+        - max_cost
+        - confidence_95
+        - sample_size
+      properties:
+        estimated_cost:
+          type: number
+          format: float
+          description: Estimated total VLM cost in USD
+          example: 8.50
+        min_cost:
+          type: number
+          format: float
+          description: Lower bound (95% confidence)
+          example: 7.20
+        max_cost:
+          type: number
+          format: float
+          description: Upper bound (95% confidence)
+          example: 10.40
+        confidence_95:
+          type: string
+          description: Confidence interval as percentage
+          example: "±12%"
+        mean_regions_per_frame:
+          type: number
+          format: float
+          description: Average regions detected per frame
+          example: 12.3
+        estimated_new_regions_per_frame:
+          type: number
+          format: float
+          description: Estimated new regions per frame (after tracking optimization)
+          example: 5.5
+        tracking_efficiency:
+          type: string
+          description: Percentage of regions tracked (not queried)
+          example: "55%"
+        scene_stability:
+          type: string
+          enum: [stable, moderate, dynamic]
+          description: Detected scene stability from sample analysis
+        sample_size:
+          type: integer
+          description: Number of frames sampled for estimation
+          example: 15
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Cost warnings (high region count, budget risk, etc.)
+          example:
+            - "⚠️ HIGH REGION COUNT: Detected 30 regions per frame"
+            - "⚠️ BUDGET WARNING: Estimated cost is 85% of budget"
+
+    Pattern:
+      type: object
+      required:
+        - id
+        - job_id
+        - cluster_id
+        - region_count
+        - frames_affected
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique pattern identifier
+        job_id:
+          type: string
+          format: uuid
+          description: Associated labeling job ID
+        cluster_id:
+          type: integer
+          description: DBSCAN cluster label
+        region_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: UUIDs of regions in this pattern
+        region_count:
+          type: integer
+          minimum: 2
+          description: Number of regions in pattern
+        frames_affected:
+          type: array
+          items:
+            type: integer
+          description: Frame indices containing these regions
+        sample_image_paths:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            format: path
+          description: Paths to representative sample images
+        avg_bbox_size:
+          type: object
+          properties:
+            width:
+              type: number
+              format: float
+            height:
+              type: number
+              format: float
+          description: Average bounding box size (width, height)
+        avg_similarity_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Average intra-cluster similarity
+        status:
+          type: string
+          enum: [unresolved, in_progress, resolved]
+          description: Pattern resolution status
+        confirmed_label:
+          type: string
+          nullable: true
+          description: Manual label applied to all regions (if resolved)
+        created_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code or type
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional error context (optional)
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "INVALID_REQUEST"
+            message: "Budget limit must be positive"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "NOT_FOUND"
+            message: "Job with ID 'abc123' not found"
