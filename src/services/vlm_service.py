@@ -49,11 +49,19 @@ class VLMService:
         "perhaps",
     ]
 
-    # GPT-5.2 pricing (example rates - adjust based on actual API pricing)
+    # OpenAI Vision Model Pricing (as of 2025)
     PRICING = {
-        "gpt-5.2": {
-            "input": 0.01,  # $0.01 per 1K input tokens
-            "output": 0.03,  # $0.03 per 1K output tokens
+        "gpt-4o": {
+            "input": 0.0025,  # $2.50 per 1M tokens = $0.0025 per 1K tokens
+            "output": 0.01,  # $10.00 per 1M tokens = $0.01 per 1K tokens
+        },
+        "gpt-4o-mini": {
+            "input": 0.00015,  # $0.15 per 1M tokens = $0.00015 per 1K tokens
+            "output": 0.0006,  # $0.60 per 1M tokens = $0.0006 per 1K tokens
+        },
+        "gpt-4-turbo": {
+            "input": 0.01,  # $10.00 per 1M tokens = $0.01 per 1K tokens
+            "output": 0.03,  # $30.00 per 1M tokens = $0.03 per 1K tokens
         }
     }
 
@@ -80,7 +88,7 @@ class VLMService:
             region: UncertainRegion to label
             image_path: Path to cropped region image
             prompt: Prompt text for VLM
-            model: VLM model name (default "gpt-5.2")
+            model: VLM model name (default "gpt-4o")
 
         Returns:
             VLMQuery with response and metadata
@@ -298,7 +306,7 @@ class VLMService:
         """
         if model not in self.PRICING:
             # Default pricing if model not found
-            model = "gpt-5.2"
+            model = "gpt-4o"
 
         pricing = self.PRICING[model]
         input_cost = (input_tokens / 1000.0) * pricing["input"]
@@ -336,7 +344,7 @@ class VLMService:
             regions: List of regions to query
             image_paths: List of cropped region image paths (parallel to regions)
             prompt: Prompt text for VLM
-            model: VLM model name (default "gpt-5.2")
+            model: VLM model name (default "gpt-4o")
             max_workers: Number of parallel workers (default 10)
 
         Returns:

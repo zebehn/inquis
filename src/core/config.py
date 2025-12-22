@@ -41,7 +41,7 @@ class ZImageConfig:
 class VLMConfig:
     """Vision-Language Model configuration."""
 
-    model: str = "gpt-5.2"
+    model: str = "gpt-4o"  # OpenAI vision model (gpt-4o, gpt-4o-mini, gpt-4-turbo)
     max_tokens: int = 300
     temperature: float = 0.1
     retry_max_attempts: int = 3

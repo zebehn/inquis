@@ -17,11 +17,19 @@ from src.models.semantic_labeling_job import SemanticLabelingJob
 class CostTrackingService:
     """Service for tracking VLM API costs and enforcing budget limits."""
 
-    # GPT-5.2 pricing (aligned with VLMService)
+    # OpenAI Vision Model Pricing (aligned with VLMService, as of 2025)
     PRICING = {
-        "gpt-5.2": {
-            "input": 0.01,  # $0.01 per 1K input tokens
-            "output": 0.03,  # $0.03 per 1K output tokens
+        "gpt-4o": {
+            "input": 0.0025,  # $2.50 per 1M tokens = $0.0025 per 1K tokens
+            "output": 0.01,  # $10.00 per 1M tokens = $0.01 per 1K tokens
+        },
+        "gpt-4o-mini": {
+            "input": 0.00015,  # $0.15 per 1M tokens = $0.00015 per 1K tokens
+            "output": 0.0006,  # $0.60 per 1M tokens = $0.0006 per 1K tokens
+        },
+        "gpt-4-turbo": {
+            "input": 0.01,  # $10.00 per 1M tokens = $0.01 per 1K tokens
+            "output": 0.03,  # $30.00 per 1M tokens = $0.03 per 1K tokens
         },
         "gpt-4-vision": {
             "input": 0.01,
@@ -51,9 +59,9 @@ class CostTrackingService:
         Returns:
             Estimated cost in USD
         """
-        # Default to gpt-5.2 if model not found
+        # Default to gpt-4o if model not found
         if model not in self.PRICING:
-            model = "gpt-5.2"
+            model = "gpt-4o"
 
         pricing = self.PRICING[model]
 

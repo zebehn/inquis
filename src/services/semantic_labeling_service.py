@@ -126,7 +126,7 @@ class SemanticLabelingService:
             configuration=JobConfiguration(
                 frame_sampling=frame_sampling,
                 confidence_threshold=confidence_threshold,
-                model_name="gpt-5.2",
+                model_name="gpt-4o",
                 enable_tracking=enable_tracking,
                 tracking_iou_threshold=tracking_iou_threshold,
             ),
@@ -432,14 +432,14 @@ class SemanticLabelingService:
         input_tokens = 1000
         output_tokens = 500
         total_tokens = input_tokens + output_tokens
-        cost = self.cost_tracker.calculate_cost(input_tokens, output_tokens, "gpt-5.2")
+        cost = self.cost_tracker.calculate_cost(input_tokens, output_tokens, "gpt-4o")
 
         return VLMQuery(
             id=uuid4(),
             region_id=region_id,
             image_path=Path("/tmp/mock.jpg"),
             prompt="Identify the object in this image.",
-            model_name="gpt-5.2",
+            model_name="gpt-4o",
             response={
                 "label": "car" if not is_uncertain else "unknown",
                 "confidence": confidence,

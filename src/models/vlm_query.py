@@ -42,7 +42,7 @@ class VLMQuery(BaseModel):
         region_id: Foreign key to UncertainRegion
         image_path: Path to image sent to VLM
         prompt: Prompt text sent to VLM
-        model_name: VLM model used (e.g., "gpt-5.2")
+        model_name: VLM model used (e.g., "gpt-4o", "gpt-4o-mini")
         response: VLM response with label, confidence, reasoning, raw_response
         token_count: Tokens used in query (0 if failed)
         cost: Estimated cost in USD
