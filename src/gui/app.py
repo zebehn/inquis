@@ -54,6 +54,7 @@ from src.services.semantic_labeling_service import SemanticLabelingService
 from src.core.config import ConfigManager
 from src.utils.logging import setup_logging
 from src.models.segmentation_frame import SegmentationFrame, InstanceMask
+from src.models.video_session import VideoSession, SessionStatus
 import numpy as np
 import os
 from uuid import uuid4, UUID
@@ -246,6 +247,21 @@ def process_video(video_path: Path):
         start_frame = get_state("start_frame", 0)
         end_frame = get_state("end_frame", metadata["frame_count"] if metadata else None)
 
+        # Create and save VideoSession object
+        now = datetime.now()
+        video_session = VideoSession(
+            id=UUID(session_id),
+            filename=video_path.name,
+            filepath=video_path,
+            upload_timestamp=now,
+            status=SessionStatus.PROCESSING,
+            metadata=metadata,
+            processing_progress=0.0,
+            created_at=now,
+            updated_at=now,
+        )
+        storage.save_video_session(session_id, video_session)
+
         # Validate frame range
         if end_frame is None or end_frame > metadata["frame_count"]:
             end_frame = metadata["frame_count"]
@@ -297,6 +313,12 @@ def process_video(video_path: Path):
                 "bboxes": result.bboxes,
             }
 
+        # Update VideoSession status to COMPLETED
+        video_session.status = SessionStatus.COMPLETED
+        video_session.processing_progress = 1.0
+        video_session.updated_at = datetime.now()
+        storage.save_video_session(session_id, video_session)
+
         # Save results to state
         set_state("segmentation_results", segmentation_results)
         set_state("processing", False)
@@ -307,6 +329,15 @@ def process_video(video_path: Path):
         st.success(f"✅ Processing complete! Processed {total_frames_to_process} frames (frames {start_frame}-{end_frame - 1}).")
 
     except Exception as e:
+        # Update session status to FAILED
+        try:
+            video_session.status = SessionStatus.FAILED
+            video_session.error_message = str(e)
+            video_session.updated_at = datetime.now()
+            storage.save_video_session(session_id, video_session)
+        except:
+            pass  # Ignore errors in error handler
+
         set_error(f"Error processing video: {str(e)}")
         st.error(f"❌ {get_state('error_message')}")
 
@@ -482,16 +513,16 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
         if vlm_service and semantic_labeling_service:
             # Batch Semantic Labeling Workflow
             try:
-                video_metadata = get_state("video_metadata")
-                video_path = Path(video_metadata.get("filepath", "/tmp/video.mp4")) if video_metadata else None
+                # Load VideoSession to get video path
+                video_session = storage.load_video_session(session_id)
+                video_path = video_session.filepath
 
-                if video_path:
-                    render_batch_semantic_labeling_workflow(
-                        session_id=session_id,
-                        video_path=video_path,
-                        semantic_labeling_service=semantic_labeling_service,
-                        storage_service=storage,
-                    )
+                render_batch_semantic_labeling_workflow(
+                    session_id=session_id,
+                    video_path=video_path,
+                    semantic_labeling_service=semantic_labeling_service,
+                    storage_service=storage,
+                )
             except Exception as e:
                 st.error(f"❌ Error rendering batch semantic labeling: {str(e)}")
 
