@@ -31,10 +31,15 @@ def storage_service(tmp_path):
 
 @pytest.fixture
 def vlm_service():
-    """Create VLMService with test API key."""
+    """Create VLMService with test API key and rate limiting."""
     import os
     api_key = os.getenv("OPENAI_API_KEY", "test-api-key")
-    return VLMService(api_key=api_key, confidence_threshold=0.5)
+    return VLMService(
+        api_key=api_key,
+        confidence_threshold=0.5,
+        enable_rate_limiting=True,
+        requests_per_second=7.5,
+    )
 
 
 @pytest.fixture

@@ -100,7 +100,13 @@ def initialize_app():
         # Initialize VLMService if API key is available
         vlm_api_key = os.getenv("OPENAI_API_KEY")
         if vlm_api_key:
-            st.session_state.vlm_service = VLMService(api_key=vlm_api_key)
+            # Enable rate limiting to prevent hitting OpenAI API limits
+            # 7.5 req/sec = 450 req/min (below typical Tier 1 limit of 500 req/min)
+            st.session_state.vlm_service = VLMService(
+                api_key=vlm_api_key,
+                enable_rate_limiting=True,
+                requests_per_second=7.5,
+            )
         else:
             st.session_state.vlm_service = None
 
