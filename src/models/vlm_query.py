@@ -59,7 +59,7 @@ class VLMQuery(BaseModel):
     region_id: UUID
     image_path: Path
     prompt: str = Field(min_length=1)  # Must not be empty
-    model_name: str = Field(default="gpt-5.2")
+    model_name: str = Field(default="gpt-4o")  # OpenAI vision model (gpt-4o, gpt-4o-mini, gpt-4-turbo)
     response: Dict[str, Any] = Field(default_factory=dict)  # {label, confidence, reasoning, raw_response}
     token_count: int = Field(ge=0)  # Must be >= 0
     cost: float = Field(ge=0.0)  # Must be >= 0

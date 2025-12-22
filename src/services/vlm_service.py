@@ -72,7 +72,7 @@ class VLMService:
         region: UncertainRegion,
         image_path: Path,
         prompt: str,
-        model: str = "gpt-5.2",
+        model: str = "gpt-4o",
     ) -> VLMQuery:
         """Query VLM with region image to generate semantic label.
 
@@ -325,7 +325,7 @@ class VLMService:
         regions: List[Any],
         image_paths: List[Path],
         prompt: str,
-        model: str = "gpt-5.2",
+        model: str = "gpt-4o",
         max_workers: int = 10,
     ) -> List[VLMQuery]:
         """Query multiple regions in parallel using ThreadPoolExecutor.
@@ -457,7 +457,7 @@ class VLMService:
         regions: List[Any],
         image_paths: List[Path],
         prompt: str,
-        model: str = "gpt-5.2",
+        model: str = "gpt-4o",
         max_workers: int = 10,
         rpm_limit: int = 450,
     ) -> List[VLMQuery]:
@@ -469,7 +469,7 @@ class VLMService:
             regions: List of regions to query
             image_paths: List of cropped region image paths
             prompt: Prompt text for VLM
-            model: VLM model name (default "gpt-5.2")
+            model: VLM model name (default "gpt-4o")
             max_workers: Number of parallel workers (default 10)
             rpm_limit: Requests per minute limit (default 450 for Tier 1)
 

@@ -55,7 +55,7 @@ class JobConfiguration(BaseModel):
 
     frame_sampling: int = Field(ge=1, default=1)  # Process every Nth frame
     confidence_threshold: float = Field(ge=0.0, le=1.0, default=0.5)  # VLM confidence threshold
-    model_name: str = Field(default="gpt-5.2")  # VLM model to use
+    model_name: str = Field(default="gpt-4o")  # VLM model to use (gpt-4o, gpt-4o-mini, gpt-4-turbo)
     enable_tracking: bool = Field(default=True)  # Enable region tracking optimization
     tracking_iou_threshold: float = Field(ge=0.0, le=1.0, default=0.7)  # IoU threshold for tracking
 
