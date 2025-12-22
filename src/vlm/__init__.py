@@ -21,6 +21,7 @@ from src.vlm.exceptions import (
     VLMResponseError,
     VLMNetworkError,
 )
+from src.vlm.rate_limiter import RateLimiter, RateLimiterConfig
 
 __all__ = [
     "VLMClient",
@@ -34,6 +35,8 @@ __all__ = [
     "VLMRateLimitError",
     "VLMResponseError",
     "VLMNetworkError",
+    "RateLimiter",
+    "RateLimiterConfig",
 ]
 
 __version__ = "1.0.0"

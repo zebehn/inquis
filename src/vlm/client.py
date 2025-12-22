@@ -28,6 +28,7 @@ from src.vlm.exceptions import (
     VLMNetworkError,
 )
 from src.vlm.utils import encode_image_base64
+from src.vlm.rate_limiter import RateLimiter, RateLimiterConfig
 
 
 class VLMConfig(BaseModel):
@@ -41,6 +42,7 @@ class VLMConfig(BaseModel):
         retry_base_delay: Base delay for exponential backoff (seconds)
         retry_max_delay: Maximum delay between retries (seconds)
         confidence_threshold: Threshold for VLM_UNCERTAIN status
+        rate_limiter_config: Optional rate limiter configuration
     """
 
     api_key: str = Field(min_length=1)
@@ -50,6 +52,7 @@ class VLMConfig(BaseModel):
     retry_base_delay: float = Field(default=1.0, ge=0.1, le=10.0)
     retry_max_delay: float = Field(default=60.0, ge=1.0, le=300.0)
     confidence_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    rate_limiter_config: Optional[RateLimiterConfig] = Field(default=None)
 
     class Config:
         """Pydantic config."""
@@ -81,6 +84,12 @@ class VLMClient:
         """
         self.config = config
         self._client = OpenAI(api_key=config.api_key, timeout=config.timeout)
+
+        # Initialize rate limiter if configured
+        if config.rate_limiter_config:
+            self._rate_limiter: Optional[RateLimiter] = RateLimiter(config.rate_limiter_config)
+        else:
+            self._rate_limiter = None
 
         # Validate API key by making a test call (optional, can be expensive)
         # For now, we'll validate on first use
@@ -161,21 +170,9 @@ class VLMClient:
                 responded_at=datetime.now(),
             )
 
-        except OpenAIRateLimitError as e:
-            raise VLMRateLimitError(
-                f"Rate limit exceeded: {str(e)}",
-                retry_after=self._extract_retry_after(e),
-                original_error=e
-            )
-        except APIError as e:
-            if "authentication" in str(e).lower() or "api key" in str(e).lower():
-                raise VLMAuthError(f"Authentication failed: {str(e)}", e)
-            raise VLMNetworkError(f"API error: {str(e)}", e)
-        except VLMResponseError:
-            # Re-raise VLM-specific errors without wrapping
-            raise
         except Exception as e:
-            raise VLMException(f"Unexpected error: {str(e)}", e)
+            # Classify and raise appropriate VLM exception
+            self._classify_and_raise_error(e)
 
     def query_batch(
         self,
@@ -277,6 +274,10 @@ class VLMClient:
         """
         for attempt in range(self.config.max_retries + 1):
             try:
+                # Apply rate limiting before API call
+                if self._rate_limiter:
+                    self._rate_limiter.acquire()
+
                 response = self._client.chat.completions.create(
                     model=request.model,
                     messages=messages,
@@ -387,3 +388,42 @@ class VLMClient:
         except (AttributeError, ValueError):
             pass
         return None
+
+    def _classify_and_raise_error(self, error: Exception):
+        """Classify exception and raise appropriate VLM exception.
+
+        Maps OpenAI SDK exceptions to VLM-specific exceptions for
+        better error categorization and handling.
+
+        Args:
+            error: Original exception from OpenAI SDK or parsing
+
+        Raises:
+            VLMRateLimitError: If rate limit exceeded
+            VLMAuthError: If authentication failed
+            VLMResponseError: If response is malformed (re-raised)
+            VLMNetworkError: If network/API error occurred
+            VLMException: For unexpected errors
+        """
+        # Re-raise VLM-specific errors without wrapping
+        if isinstance(error, VLMResponseError):
+            raise
+
+        # Rate limit errors
+        if isinstance(error, OpenAIRateLimitError):
+            raise VLMRateLimitError(
+                f"Rate limit exceeded: {str(error)}",
+                retry_after=self._extract_retry_after(error),
+                original_error=error
+            )
+
+        # Authentication errors
+        if isinstance(error, APIError):
+            error_msg = str(error).lower()
+            if "authentication" in error_msg or "api key" in error_msg:
+                raise VLMAuthError(f"Authentication failed: {str(error)}", error)
+            # Other API errors are network-related
+            raise VLMNetworkError(f"API error: {str(error)}", error)
+
+        # Unexpected errors
+        raise VLMException(f"Unexpected error: {str(error)}", error)
