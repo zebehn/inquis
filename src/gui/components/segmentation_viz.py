@@ -38,7 +38,8 @@ def render_segmentation_view(
     """
     st.subheader("🎨 Segmentation Results")
 
-    if segmentation_result is None or len(segmentation_result.get("masks", [])) == 0:
+    # Check if results exist (use labels/confidences, not masks since masks can be empty for viz)
+    if segmentation_result is None or len(segmentation_result.get("labels", [])) == 0:
         st.info("No segmentation results available. Process the video first.")
         st.image(frame_image, channels="RGB", use_column_width=True)
         return
