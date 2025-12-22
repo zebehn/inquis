@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
+from src.models.segmentation_frame import SegmentationFrame
+import numpy as np
+import cv2
+
 from src.models.semantic_labeling_job import (
     SemanticLabelingJob,
     JobStatus,
@@ -245,19 +249,11 @@ class SemanticLabelingService:
             job.in_flight_region = region_id
 
             try:
-                # Query VLM for region
-                # TODO: Implement real VLM query with image cropping and API call
-                # For now, using mock VLM query for all cases
-
-                # Get region metadata
-                metadata = self._region_metadata.get(region_id)
-                original_confidence = metadata["mask"].confidence if metadata else None
-
-                # Create mock VLM query (will be replaced with real VLM call later)
-                vlm_query = self._create_mock_vlm_query(
+                # Query VLM for region with real API call
+                vlm_query = self._query_region_with_real_vlm(
+                    session_id=session_id,
                     region_id=region_id,
-                    confidence_threshold=job.configuration.confidence_threshold,
-                    original_confidence=original_confidence,
+                    job=job,
                 )
 
                 # Evaluate confidence
@@ -337,6 +333,69 @@ class SemanticLabelingService:
             job.status = JobStatus.COMPLETED
             job.timestamps.completed_at = datetime.now()
             self._checkpoint_progress(session_id, job)
+
+    def _query_region_with_real_vlm(
+        self,
+        session_id: str,
+        region_id: UUID,
+        job: SemanticLabelingJob,
+    ) -> VLMQuery:
+        """Query VLM for a region using real API call with cropped image.
+
+        Args:
+            session_id: Session ID
+            region_id: Region UUID
+            job: SemanticLabelingJob configuration
+
+        Returns:
+            VLMQuery with real VLM response
+        """
+        from src.models.uncertain_region import UncertainRegion, RegionStatus
+        import tempfile
+
+        # Get region metadata
+        metadata = self._region_metadata.get(region_id)
+        if not metadata:
+            raise ValueError(f"Region {region_id} metadata not found")
+
+        frame_idx = metadata["frame_idx"]
+        mask = metadata["mask"]
+
+        # Load frame image
+        frame_image = self.storage.load_frame(session_id, frame_idx)
+
+        # Crop region using bbox
+        x, y, w, h = mask.bbox
+        cropped_image = frame_image[y:y+h, x:x+w]
+
+        # Save cropped image temporarily
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+            crop_path = Path(tmp.name)
+            cv2.imwrite(str(crop_path), cv2.cvtColor(cropped_image, cv2.COLOR_RGB2BGR))
+
+        # Create a temporary UncertainRegion object for VLMService.query_region()
+        # This is needed because query_region expects an UncertainRegion
+        temp_region = UncertainRegion(
+            id=region_id,
+            session_id=UUID(session_id),
+            frame_id=metadata["frame_id"],
+            frame_index=frame_idx,
+            bbox=mask.bbox,
+            uncertainty_score=1.0 - mask.confidence,  # Use segmentation confidence
+            cropped_image_path=crop_path,
+            mask_path=mask.mask_path,
+            status=RegionStatus.QUERIED,
+        )
+
+        # Use VLMService.query_region() with real API call
+        vlm_query = self.vlm.query_region(
+            region=temp_region,
+            image_path=crop_path,
+            prompt="Identify and label the primary object in this image.",
+            model=job.configuration.model_name,
+        )
+
+        return vlm_query
 
     def _create_mock_vlm_query(
         self,
