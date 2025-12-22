@@ -260,7 +260,7 @@ def process_video(video_path: Path):
             created_at=now,
             updated_at=now,
         )
-        storage.save_video_session(session_id, video_session)
+        storage.save_video_session(video_session)
 
         # Validate frame range
         if end_frame is None or end_frame > metadata["frame_count"]:
@@ -317,7 +317,7 @@ def process_video(video_path: Path):
         video_session.status = SessionStatus.COMPLETED
         video_session.processing_progress = 1.0
         video_session.updated_at = datetime.now()
-        storage.save_video_session(session_id, video_session)
+        storage.save_video_session(video_session)
 
         # Save results to state
         set_state("segmentation_results", segmentation_results)
@@ -334,7 +334,7 @@ def process_video(video_path: Path):
             video_session.status = SessionStatus.FAILED
             video_session.error_message = str(e)
             video_session.updated_at = datetime.now()
-            storage.save_video_session(session_id, video_session)
+            storage.save_video_session(video_session)
         except:
             pass  # Ignore errors in error handler
 
