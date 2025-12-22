@@ -139,7 +139,8 @@ def render_segmentation_stats(
     labels = enhanced_labels if enhanced_labels else segmentation_result.get("labels", [])
     confidences = segmentation_result.get("confidences", np.array([]))
 
-    if len(masks) == 0:
+    # Check if there are any regions to display stats for (use labels/confidences, not masks)
+    if len(labels) == 0 or len(confidences) == 0:
         return
 
     st.subheader("📊 Statistics")
@@ -148,14 +149,23 @@ def render_segmentation_stats(
     uncertain_count = sum(1 for conf in confidences if conf < uncertainty_threshold)
     uncertain_percentage = (uncertain_count / len(confidences) * 100) if len(confidences) > 0 else 0
 
-    # Calculate VLM labeling stats
-    vlm_labeled_count = len(uncertain_regions) if uncertain_regions else 0
-    vlm_confirmed = sum(1 for r in (uncertain_regions or []) if r.confirmed_label) if uncertain_regions else 0
+    # Calculate VLM labeling stats from InstanceMask fields
+    vlm_labels = segmentation_result.get("vlm_labels", [])
+    vlm_sources = segmentation_result.get("vlm_sources", [])
+
+    # Count regions with VLM labels (semantic_label is not None)
+    vlm_labeled_count = sum(1 for vlm_label in vlm_labels if vlm_label is not None)
+
+    # Count confirmed labels (vlm source is "vlm" or "manual")
+    vlm_confirmed = sum(
+        1 for vlm_source in vlm_sources
+        if vlm_source in ["vlm", "manual"]
+    )
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.metric("Instances Detected", len(masks))
+        st.metric("Instances Detected", len(labels))
 
     with col2:
         avg_conf = confidences.mean() if len(confidences) > 0 else 0.0
