@@ -51,8 +51,11 @@ from src.services.storage_service import StorageService
 from src.services.vlm_service import VLMService
 from src.core.config import ConfigManager
 from src.utils.logging import setup_logging
+from src.models.segmentation_frame import SegmentationFrame, InstanceMask
 import numpy as np
 import os
+from uuid import uuid4, UUID
+from datetime import datetime
 
 
 # Page configuration
@@ -145,6 +148,68 @@ def render_sidebar():
     return viz_settings, confidence_threshold
 
 
+def create_segmentation_frame_from_result(
+    session_id: UUID,
+    frame_idx: int,
+    result,
+    metadata: dict,
+    storage: StorageService,
+) -> SegmentationFrame:
+    """Convert SegmentationResult to SegmentationFrame and save masks.
+
+    Args:
+        session_id: Session UUID
+        frame_idx: Frame index
+        result: SegmentationResult from segmentation_service
+        metadata: Video metadata dict
+        storage: StorageService instance
+
+    Returns:
+        SegmentationFrame object
+    """
+    # Create InstanceMask objects
+    instance_masks = []
+    for i, (mask, conf, label, bbox) in enumerate(zip(
+        result.masks,
+        result.confidences,
+        result.class_labels,
+        result.bboxes,
+    )):
+        # Create mask path (will be saved on demand if needed)
+        mask_filename = f"mask_{frame_idx:06d}_{i:03d}.npz"
+        mask_path = Path(storage.get_session_dir(str(session_id))) / "masks" / mask_filename
+
+        # Calculate mask area
+        area = int(np.sum(mask)) if len(mask.shape) > 0 and mask.size > 0 else bbox[2] * bbox[3]
+
+        instance_mask = InstanceMask(
+            mask_path=mask_path,
+            class_label=label,
+            confidence=float(conf),
+            bbox=bbox,
+            area=area,
+            semantic_label=None,
+            vlm_query_id=None,
+            semantic_label_source=None,
+        )
+        instance_masks.append(instance_mask)
+
+    # Create SegmentationFrame
+    frame = SegmentationFrame(
+        id=uuid4(),
+        session_id=session_id,
+        frame_index=frame_idx,
+        timestamp=frame_idx / metadata["fps"],
+        image_path=Path(storage.get_session_dir(str(session_id))) / "frames" / f"frame_{frame_idx:06d}.jpg",
+        masks=instance_masks,
+        processing_time=0.1,  # Placeholder
+        model_version_id=uuid4(),  # Placeholder
+        processed_at=datetime.now(),
+    )
+
+    return frame
+
+
 def process_video(video_path: Path):
     """Process uploaded video.
 
@@ -198,10 +263,20 @@ def process_video(video_path: Path):
             # Save frame
             storage.save_frame(session_id, frame_idx, frame)
 
-            # Segment frame (mock for now - will return empty results)
+            # Segment frame
             result = segmentation_service.segment_frame(frame)
 
-            # Store result
+            # Create and save SegmentationFrame to storage (needed for VLM labeling)
+            seg_frame = create_segmentation_frame_from_result(
+                session_id=UUID(session_id),
+                frame_idx=frame_idx,
+                result=result,
+                metadata=metadata,
+                storage=storage,
+            )
+            storage.save_segmentation_frame(session_id, seg_frame)
+
+            # Store result in session state (for backward compatibility)
             segmentation_results[frame_idx] = {
                 "masks": result.masks,
                 "confidences": result.confidences,
