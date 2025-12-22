@@ -42,6 +42,7 @@ from src.gui.components.segmentation_viz import (
     render_confidence_filter,
 )
 from src.gui.components.vlm_labeling import (
+    render_batch_semantic_labeling_workflow,
     render_vlm_labeling_workflow,
     render_vlm_statistics_dashboard,
 )
@@ -49,6 +50,7 @@ from src.services.video_processor import VideoProcessor
 from src.services.segmentation_service import SegmentationService
 from src.services.storage_service import StorageService
 from src.services.vlm_service import VLMService
+from src.services.semantic_labeling_service import SemanticLabelingService
 from src.core.config import ConfigManager
 from src.utils.logging import setup_logging
 from src.models.segmentation_frame import SegmentationFrame, InstanceMask
@@ -100,6 +102,15 @@ def initialize_app():
             st.session_state.vlm_service = VLMService(api_key=vlm_api_key)
         else:
             st.session_state.vlm_service = None
+
+        # Initialize SemanticLabelingService
+        if st.session_state.vlm_service:
+            st.session_state.semantic_labeling_service = SemanticLabelingService(
+                vlm_service=st.session_state.vlm_service,
+                storage=st.session_state.storage,
+            )
+        else:
+            st.session_state.semantic_labeling_service = None
 
         st.session_state.config = config
         st.session_state.services_initialized = True
@@ -466,8 +477,27 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
 
         # Check if VLM service is available
         vlm_service = st.session_state.get("vlm_service")
-        if vlm_service:
-            # Load uncertain regions for this session
+        semantic_labeling_service = st.session_state.get("semantic_labeling_service")
+
+        if vlm_service and semantic_labeling_service:
+            # Batch Semantic Labeling Workflow
+            try:
+                video_metadata = get_state("video_metadata")
+                video_path = Path(video_metadata.get("filepath", "/tmp/video.mp4")) if video_metadata else None
+
+                if video_path:
+                    render_batch_semantic_labeling_workflow(
+                        session_id=session_id,
+                        video_path=video_path,
+                        semantic_labeling_service=semantic_labeling_service,
+                        storage_service=storage,
+                    )
+            except Exception as e:
+                st.error(f"❌ Error rendering batch semantic labeling: {str(e)}")
+
+            st.divider()
+
+            # Manual VLM Labeling Workflow (for uncertain regions)
             try:
                 region_ids = storage.list_uncertain_regions(session_id)
                 uncertain_regions = [
@@ -475,7 +505,7 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
                     for region_id in region_ids
                 ]
 
-                # Render VLM labeling workflow
+                # Render manual VLM labeling workflow
                 render_vlm_labeling_workflow(
                     uncertain_regions=uncertain_regions,
                     session_id=session_id,
