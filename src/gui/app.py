@@ -106,8 +106,8 @@ def initialize_app():
         # Initialize SemanticLabelingService
         if st.session_state.vlm_service:
             st.session_state.semantic_labeling_service = SemanticLabelingService(
+                storage_service=st.session_state.storage,
                 vlm_service=st.session_state.vlm_service,
-                storage=st.session_state.storage,
             )
         else:
             st.session_state.semantic_labeling_service = None
