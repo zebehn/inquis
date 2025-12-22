@@ -13,7 +13,7 @@ Public API:
 """
 
 from src.vlm.client import VLMClient, VLMConfig
-from src.vlm.models import VLMRequest, VLMResponse, VLMBatchRequest, VLMBatchResponse
+from src.vlm.models import VLMRequest, VLMResponse, VLMBatchRequest, VLMBatchResponse, VLMStatus
 from src.vlm.exceptions import (
     VLMException,
     VLMAuthError,
@@ -30,6 +30,7 @@ __all__ = [
     "VLMResponse",
     "VLMBatchRequest",
     "VLMBatchResponse",
+    "VLMStatus",
     "VLMException",
     "VLMAuthError",
     "VLMRateLimitError",

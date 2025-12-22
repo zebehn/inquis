@@ -3,15 +3,19 @@
 TDD: T081-T086 [US3] - Implement VLMService with OpenAI API integration
 
 Key Features:
-- Query OpenAI GPT-5.2 vision model with cropped region images
+- Query OpenAI vision models with cropped region images
 - Parse and validate VLM responses
 - Detect VLM_UNCERTAIN responses based on confidence and ambiguous language
 - Support manual label fallback workflow
 - Calculate API costs and track usage metrics
+
+Integration Note:
+- This service now uses the new independent VLM module (src/vlm/)
+- Maintains backward compatibility with existing VLMQuery/VLMQueryStatus models
+- Delegates core VLM logic to VLMClient for better separation of concerns
 """
 
 import json
-import base64
 import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -19,11 +23,20 @@ from datetime import datetime
 from uuid import uuid4
 import re
 
-from openai import OpenAI, RateLimitError
 from pydantic import ValidationError
 
 from src.models.vlm_query import VLMQuery, VLMQueryStatus, UserAction
 from src.models.uncertain_region import UncertainRegion
+from src.vlm import (
+    VLMClient,
+    VLMConfig,
+    VLMRequest,
+    VLMResponse,
+    VLMStatus,
+    VLMException,
+    VLMRateLimitError,
+    RateLimiterConfig,
+)
 
 
 class VLMService:
@@ -65,15 +78,39 @@ class VLMService:
         }
     }
 
-    def __init__(self, api_key: str, confidence_threshold: float = 0.5):
-        """Initialize VLM service with OpenAI API client.
+    def __init__(
+        self,
+        api_key: str,
+        confidence_threshold: float = 0.5,
+        enable_rate_limiting: bool = False,
+        requests_per_second: float = 10.0,
+    ):
+        """Initialize VLM service with VLM client.
 
         Args:
             api_key: OpenAI API key
             confidence_threshold: Confidence threshold for VLM_UNCERTAIN (default 0.5)
+            enable_rate_limiting: Enable proactive rate limiting (default False)
+            requests_per_second: Max requests per second if rate limiting enabled (default 10.0)
         """
-        self.client = OpenAI(api_key=api_key)
         self.confidence_threshold = confidence_threshold
+
+        # Configure rate limiter if enabled
+        rate_limiter_config = None
+        if enable_rate_limiting:
+            rate_limiter_config = RateLimiterConfig(
+                requests_per_second=requests_per_second,
+                burst_capacity=int(requests_per_second * 2),
+                enabled=True
+            )
+
+        # Initialize VLM client with new module
+        config = VLMConfig(
+            api_key=api_key,
+            confidence_threshold=confidence_threshold,
+            rate_limiter_config=rate_limiter_config
+        )
+        self.client = VLMClient(config)
 
     def query_region(
         self,
@@ -95,76 +132,33 @@ class VLMService:
         """
         query_id = uuid4()
         queried_at = datetime.now()
-        start_time = time.time()
 
         try:
-            # Encode image to base64
-            image_base64 = self.encode_image_base64(image_path)
-
-            # Create messages for VLM
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a computer vision expert. Analyze the image and provide a semantic label for the object shown. Respond in JSON format with: {\"label\": \"object_class\", \"confidence\": 0.0-1.0, \"reasoning\": \"explanation\"}",
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_base64}",
-                                "detail": "high",
-                            },
-                        },
-                    ],
-                },
-            ]
-
-            # Call OpenAI API
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                max_tokens=500,
-                temperature=0.2,  # Lower temperature for more consistent outputs
-            )
-
-            # Calculate latency
-            latency = time.time() - start_time
-
-            # Parse response
-            raw_response = response.choices[0].message.content
-            parsed_response = self.parse_response(raw_response)
-
-            # Evaluate confidence to determine status
-            status = self.evaluate_confidence(parsed_response)
-
-            # Calculate cost
-            input_tokens = response.usage.prompt_tokens if hasattr(response.usage, 'prompt_tokens') else 0
-            output_tokens = response.usage.completion_tokens if hasattr(response.usage, 'completion_tokens') else 0
-            total_tokens = response.usage.total_tokens
-            cost = self.calculate_cost(input_tokens, output_tokens, model)
-
-            # Create VLMQuery
-            vlm_query = VLMQuery(
-                id=query_id,
+            # Create VLM request
+            vlm_request = VLMRequest(
                 region_id=region.id,
                 image_path=image_path,
                 prompt=prompt,
-                model_name=model,
-                response=parsed_response,
-                token_count=total_tokens,
-                cost=cost,
-                latency=latency,
-                status=status,
-                queried_at=queried_at,
-                responded_at=datetime.now(),
+                model=model,
+                max_tokens=500,
+                temperature=0.2,
             )
 
-            return vlm_query
+            # Query VLM client (new module)
+            vlm_response: VLMResponse = self.client.query_region(vlm_request)
 
-        except RateLimitError as e:
+            # Convert VLMResponse to VLMQuery for backward compatibility
+            return self._convert_response_to_query(
+                query_id=query_id,
+                region=region,
+                image_path=image_path,
+                prompt=prompt,
+                model=model,
+                vlm_response=vlm_response,
+                queried_at=queried_at,
+            )
+
+        except VLMRateLimitError as e:
             # Handle rate limiting
             return VLMQuery(
                 id=query_id,
@@ -175,14 +169,14 @@ class VLMService:
                 response={},
                 token_count=0,
                 cost=0.0,
-                latency=time.time() - start_time,
+                latency=0.0,
                 status=VLMQueryStatus.RATE_LIMITED,
                 error_message=f"Rate limit exceeded: {str(e)}",
                 queried_at=queried_at,
             )
 
-        except Exception as e:
-            # Handle other API failures
+        except VLMException as e:
+            # Handle other VLM failures
             return VLMQuery(
                 id=query_id,
                 region_id=region.id,
@@ -192,14 +186,79 @@ class VLMService:
                 response={},
                 token_count=0,
                 cost=0.0,
-                latency=time.time() - start_time,
+                latency=0.0,
                 status=VLMQueryStatus.FAILED,
                 error_message=str(e),
                 queried_at=queried_at,
             )
 
+    def _convert_response_to_query(
+        self,
+        query_id,
+        region: UncertainRegion,
+        image_path: Path,
+        prompt: str,
+        model: str,
+        vlm_response: VLMResponse,
+        queried_at: datetime,
+    ) -> VLMQuery:
+        """Convert VLMResponse from new module to VLMQuery for backward compatibility.
+
+        Args:
+            query_id: Query UUID
+            region: UncertainRegion
+            image_path: Image path
+            prompt: Prompt text
+            model: Model name
+            vlm_response: Response from VLM client
+            queried_at: Query timestamp
+
+        Returns:
+            VLMQuery for legacy compatibility
+        """
+        # Map VLMStatus to VLMQueryStatus
+        status_map = {
+            VLMStatus.SUCCESS: VLMQueryStatus.SUCCESS,
+            VLMStatus.VLM_UNCERTAIN: VLMQueryStatus.VLM_UNCERTAIN,
+            VLMStatus.FAILED: VLMQueryStatus.FAILED,
+            VLMStatus.RATE_LIMITED: VLMQueryStatus.RATE_LIMITED,
+        }
+
+        # Build response dict for legacy format
+        response_dict = {
+            "label": vlm_response.label or "unknown",
+            "confidence": vlm_response.confidence or 0.0,
+            "reasoning": vlm_response.reasoning or "",
+            "raw_response": vlm_response.raw_response or {},
+        }
+
+        # Check for uncertainty keywords (legacy behavior)
+        status = status_map.get(vlm_response.status, VLMQueryStatus.FAILED)
+        if status == VLMQueryStatus.SUCCESS:
+            # Double-check with uncertainty keywords
+            status = self.evaluate_confidence(response_dict)
+
+        return VLMQuery(
+            id=query_id,
+            region_id=region.id,
+            image_path=image_path,
+            prompt=prompt,
+            model_name=model,
+            response=response_dict,
+            token_count=vlm_response.tokens_used,
+            cost=vlm_response.cost,
+            latency=vlm_response.latency_ms / 1000.0,  # Convert ms to seconds
+            status=status,
+            queried_at=queried_at,
+            responded_at=vlm_response.responded_at or datetime.now(),
+            error_message=vlm_response.error_message,
+        )
+
     def parse_response(self, raw_response: str) -> Dict[str, Any]:
         """Parse VLM response JSON.
+
+        Note: This method is kept for backward compatibility but is no longer used internally.
+        The new VLM module handles parsing internally.
 
         Args:
             raw_response: Raw JSON string from VLM
@@ -296,6 +355,9 @@ class VLMService:
     def calculate_cost(self, input_tokens: int, output_tokens: int, model: str) -> float:
         """Calculate API cost based on token usage.
 
+        Note: This method is kept for backward compatibility but is no longer used internally.
+        The new VLM module handles cost calculation internally.
+
         Args:
             input_tokens: Number of input tokens
             output_tokens: Number of output tokens
@@ -317,14 +379,17 @@ class VLMService:
     def encode_image_base64(self, image_path: Path) -> str:
         """Encode image to base64 for API transmission.
 
+        Note: This method is kept for backward compatibility but is no longer used internally.
+        The new VLM module handles image encoding internally.
+
         Args:
             image_path: Path to image file
 
         Returns:
             Base64-encoded image string
         """
-        with open(image_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode("utf-8")
+        from src.vlm.utils import encode_image_base64 as vlm_encode
+        return vlm_encode(image_path)
 
     # T011-T013: Batch VLM processing with parallel execution, rate limiting, and retry logic
 
@@ -336,9 +401,11 @@ class VLMService:
         model: str = "gpt-4o",
         max_workers: int = 10,
     ) -> List[VLMQuery]:
-        """Query multiple regions in parallel using ThreadPoolExecutor.
+        """Query multiple regions in parallel using VLM module's batch query.
 
         TDD: T011 - Extend VLMService with query_regions_parallel()
+
+        Note: Now uses VLM module's optimized batch query with built-in retry logic.
 
         Args:
             regions: List of regions to query
@@ -350,53 +417,52 @@ class VLMService:
         Returns:
             List of VLMQuery results (parallel to input regions)
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from src.vlm import VLMBatchRequest
 
         # Validate inputs
         if len(regions) != len(image_paths):
             raise ValueError("regions and image_paths must have same length")
 
-        # Create tasks
-        futures = {}
-        results = [None] * len(regions)  # Preserve input order
+        # Create VLM requests
+        vlm_requests = [
+            VLMRequest(
+                region_id=region.id,
+                image_path=image_path,
+                prompt=prompt,
+                model=model,
+                max_tokens=500,
+                temperature=0.2,
+            )
+            for region, image_path in zip(regions, image_paths)
+        ]
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all queries
-            for idx, (region, image_path) in enumerate(zip(regions, image_paths)):
-                future = executor.submit(
-                    self._query_region_with_retry,
-                    region,
-                    image_path,
-                    prompt,
-                    model
-                )
-                futures[future] = idx
+        # Create batch request
+        batch_request = VLMBatchRequest(
+            requests=vlm_requests,
+            max_workers=max_workers,
+            fail_fast=False  # Continue on errors
+        )
 
-            # Collect results as they complete
-            for future in as_completed(futures):
-                idx = futures[future]
-                try:
-                    vlm_query = future.result()
-                    results[idx] = vlm_query
-                except Exception as e:
-                    # Create failed VLMQuery for exception
-                    region = regions[idx]
-                    results[idx] = VLMQuery(
-                        id=uuid4(),
-                        region_id=region.id,
-                        image_path=image_paths[idx],
-                        prompt=prompt,
-                        model_name=model,
-                        response={},
-                        token_count=0,
-                        cost=0.0,
-                        latency=0.0,
-                        status=VLMQueryStatus.FAILED,
-                        error_message=f"Parallel execution error: {str(e)}",
-                        queried_at=datetime.now(),
-                    )
+        # Execute batch query
+        batch_response = self.client.query_batch(batch_request)
 
-        return results
+        # Convert VLMResponse objects to VLMQuery objects
+        vlm_queries = []
+        queried_at = batch_response.started_at
+
+        for i, (region, vlm_response) in enumerate(zip(regions, batch_response.responses)):
+            vlm_query = self._convert_response_to_query(
+                query_id=uuid4(),
+                region=region,
+                image_path=image_paths[i],
+                prompt=prompt,
+                model=model,
+                vlm_response=vlm_response,
+                queried_at=queried_at,
+            )
+            vlm_queries.append(vlm_query)
+
+        return vlm_queries
 
     def _query_region_with_retry(
         self,
@@ -410,6 +476,9 @@ class VLMService:
 
         TDD: T012 - Add exponential backoff retry wrapper
 
+        Note: This method is deprecated. The new VLM module handles retries internally.
+        Kept for backward compatibility.
+
         Args:
             region: Region to query
             image_path: Path to cropped region image
@@ -420,45 +489,8 @@ class VLMService:
         Returns:
             VLMQuery result
         """
-        base_delay = 1.0  # 1 second base delay
-        max_delay = 60.0  # 60 second max delay
-        jitter_factor = 0.25  # ±25% jitter
-
-        for attempt in range(max_retries + 1):
-            # Query region
-            vlm_query = self.query_region(region, image_path, prompt, model)
-
-            # Check if rate limited
-            if vlm_query.status == VLMQueryStatus.RATE_LIMITED:
-                if attempt < max_retries:
-                    # Calculate exponential backoff delay
-                    delay = min(base_delay * (2 ** attempt), max_delay)
-                    # Add jitter (±25%)
-                    jitter = delay * jitter_factor * (2 * (time.time() % 1) - 1)
-                    delay_with_jitter = delay + jitter
-
-                    # Wait before retry
-                    time.sleep(delay_with_jitter)
-                    continue
-                else:
-                    # Max retries exceeded
-                    return vlm_query
-            elif vlm_query.status == VLMQueryStatus.FAILED:
-                if attempt < max_retries:
-                    # Retry on failure (but with shorter backoff)
-                    delay = min(base_delay * (1.5 ** attempt), max_delay / 2)
-                    jitter = delay * jitter_factor * (2 * (time.time() % 1) - 1)
-                    delay_with_jitter = delay + jitter
-                    time.sleep(delay_with_jitter)
-                    continue
-                else:
-                    return vlm_query
-            else:
-                # Success or VLM_UNCERTAIN - return immediately
-                return vlm_query
-
-        # Should not reach here, but return last query
-        return vlm_query
+        # Delegate to query_region - VLM module handles retries internally
+        return self.query_region(region, image_path, prompt, model)
 
     def query_regions_with_rate_limiting(
         self,
@@ -473,76 +505,32 @@ class VLMService:
 
         TDD: T013 - Add proactive rate limiting
 
+        Note: This method now delegates to query_regions_parallel. Rate limiting is handled
+        by the VLM module if enabled during VLMService initialization. The rpm_limit parameter
+        is kept for backward compatibility but ignored if rate_limiter_config was provided
+        during initialization.
+
+        To enable rate limiting, initialize VLMService with:
+            service = VLMService(api_key="...", enable_rate_limiting=True, requests_per_second=7.5)
+            # 7.5 req/sec = 450 requests per minute
+
         Args:
             regions: List of regions to query
             image_paths: List of cropped region image paths
             prompt: Prompt text for VLM
             model: VLM model name (default "gpt-4o")
             max_workers: Number of parallel workers (default 10)
-            rpm_limit: Requests per minute limit (default 450 for Tier 1)
+            rpm_limit: Requests per minute limit (default 450, kept for backward compatibility)
 
         Returns:
             List of VLMQuery results
         """
-        # Calculate minimum delay between requests to stay under rpm_limit
-        min_delay_seconds = 60.0 / rpm_limit  # e.g., 450 RPM = 0.133s between requests
-
-        # Track last request time
-        last_request_time = [0.0]  # Mutable list for closure access
-
-        def rate_limited_query(region: Any, image_path: Path) -> VLMQuery:
-            """Query with rate limiting."""
-            # Wait if necessary to respect rate limit
-            current_time = time.time()
-            elapsed = current_time - last_request_time[0]
-            if elapsed < min_delay_seconds:
-                time.sleep(min_delay_seconds - elapsed)
-
-            # Update last request time
-            last_request_time[0] = time.time()
-
-            # Execute query with retry
-            return self._query_region_with_retry(region, image_path, prompt, model)
-
-        # Use parallel execution with rate limiting
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        # Validate inputs
-        if len(regions) != len(image_paths):
-            raise ValueError("regions and image_paths must have same length")
-
-        # Create tasks
-        futures = {}
-        results = [None] * len(regions)
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all queries
-            for idx, (region, image_path) in enumerate(zip(regions, image_paths)):
-                future = executor.submit(rate_limited_query, region, image_path)
-                futures[future] = idx
-
-            # Collect results
-            for future in as_completed(futures):
-                idx = futures[future]
-                try:
-                    vlm_query = future.result()
-                    results[idx] = vlm_query
-                except Exception as e:
-                    # Create failed VLMQuery
-                    region = regions[idx]
-                    results[idx] = VLMQuery(
-                        id=uuid4(),
-                        region_id=region.id,
-                        image_path=image_paths[idx],
-                        prompt=prompt,
-                        model_name=model,
-                        response={},
-                        token_count=0,
-                        cost=0.0,
-                        latency=0.0,
-                        status=VLMQueryStatus.FAILED,
-                        error_message=f"Rate limiting error: {str(e)}",
-                        queried_at=datetime.now(),
-                    )
-
-        return results
+        # Delegate to query_regions_parallel
+        # Rate limiting is handled by VLM module if configured
+        return self.query_regions_parallel(
+            regions=regions,
+            image_paths=image_paths,
+            prompt=prompt,
+            model=model,
+            max_workers=max_workers,
+        )
