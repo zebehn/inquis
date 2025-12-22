@@ -245,25 +245,20 @@ class SemanticLabelingService:
             job.in_flight_region = region_id
 
             try:
-                # Query VLM for region (simplified - real implementation would load actual region data)
-                # For now, we'll skip actual VLM query in tests without API key
-                # This would normally call: vlm_query = self.vlm.query_region(...)
+                # Query VLM for region
+                # TODO: Implement real VLM query with image cropping and API call
+                # For now, using mock VLM query for all cases
 
-                # Simulate VLM response
-                import os
-                if os.getenv("OPENAI_API_KEY") and os.getenv("OPENAI_API_KEY") != "test-api-key":
-                    # Real VLM query (not in tests)
-                    pass
-                else:
-                    # Mock response for tests - use original mask confidence if available
-                    metadata = self._region_metadata.get(region_id)
-                    original_confidence = metadata["mask"].confidence if metadata else None
+                # Get region metadata
+                metadata = self._region_metadata.get(region_id)
+                original_confidence = metadata["mask"].confidence if metadata else None
 
-                    vlm_query = self._create_mock_vlm_query(
-                        region_id=region_id,
-                        confidence_threshold=job.configuration.confidence_threshold,
-                        original_confidence=original_confidence,
-                    )
+                # Create mock VLM query (will be replaced with real VLM call later)
+                vlm_query = self._create_mock_vlm_query(
+                    region_id=region_id,
+                    confidence_threshold=job.configuration.confidence_threshold,
+                    original_confidence=original_confidence,
+                )
 
                 # Evaluate confidence
                 is_uncertain = self._evaluate_vlm_confidence(vlm_query, job.configuration.confidence_threshold)
