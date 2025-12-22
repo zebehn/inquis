@@ -385,6 +385,7 @@ class SemanticLabelingService:
             cropped_image_path=crop_path,
             mask_path=mask.mask_path,
             status=RegionStatus.QUERIED,
+            created_at=datetime.now(),
         )
 
         # Use VLMService.query_region() with real API call
