@@ -47,34 +47,34 @@ def render_segmentation_view(
     labels = segmentation_result["labels"]
     confidences = segmentation_result["confidences"]
     bboxes = segmentation_result.get("bboxes", [])
+    vlm_labels = segmentation_result.get("vlm_labels", [])
+    vlm_sources = segmentation_result.get("vlm_sources", [])
 
-    # Enhance labels with VLM semantic labels if available
-    if uncertain_regions:
-        enhanced_labels = []
-        for i, (bbox, label) in enumerate(zip(bboxes, labels)):
-            # Try to find matching uncertain region by bbox
-            matched_region = None
-            for region in uncertain_regions:
-                # Simple bbox matching (could be improved)
-                if region.bbox == bbox:
-                    matched_region = region
-                    break
+    # Enhance labels with VLM semantic labels from InstanceMask
+    enhanced_labels = []
+    for i, label in enumerate(labels):
+        vlm_label = vlm_labels[i] if i < len(vlm_labels) else None
+        vlm_source = vlm_sources[i] if i < len(vlm_sources) else None
 
-            # Create enhanced label
-            if matched_region:
-                if matched_region.confirmed_label:
-                    # Manual or confirmed label
-                    enhanced_label = f"{matched_region.confirmed_label} ✓"
-                else:
-                    # VLM uncertain
-                    enhanced_label = f"{label} ⚠️ (uncertain)"
+        if vlm_label and vlm_source:
+            if vlm_source == "vlm":
+                # High confidence VLM label
+                enhanced_label = f"{vlm_label} ✓"
+            elif vlm_source == "vlm_uncertain":
+                # Low confidence VLM label
+                enhanced_label = f"{vlm_label} ⚠️ (uncertain)"
+            elif vlm_source == "manual":
+                # Manual label
+                enhanced_label = f"{vlm_label} ✓✓"
             else:
-                # No VLM label yet, use original
                 enhanced_label = label
+        else:
+            # No VLM label, use original
+            enhanced_label = label
 
-            enhanced_labels.append(enhanced_label)
+        enhanced_labels.append(enhanced_label)
 
-        labels = enhanced_labels
+    labels = enhanced_labels
 
     # Create visualization based on settings
     result_image = frame_image.copy()

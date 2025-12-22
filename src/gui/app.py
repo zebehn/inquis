@@ -314,11 +314,28 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
         try:
             frame = storage.load_frame(session_id, frame_index)
 
-            # Get segmentation results
-            segmentation_results = get_state("segmentation_results", {})
-            frame_result = segmentation_results.get(frame_index)
+            # Load segmentation frame from storage (includes VLM labels)
+            try:
+                seg_frame = storage.load_segmentation_frame(session_id, frame_index)
 
-            # Load VLM labels (uncertain regions) for this frame
+                # Build frame_result from stored segmentation frame
+                frame_result = {
+                    "masks": np.array([]),  # Masks not needed for visualization
+                    "confidences": np.array([mask.confidence for mask in seg_frame.masks]),
+                    "labels": [mask.class_label for mask in seg_frame.masks],
+                    "bboxes": [mask.bbox for mask in seg_frame.masks],
+                    "vlm_labels": [mask.semantic_label for mask in seg_frame.masks],
+                    "vlm_sources": [mask.semantic_label_source for mask in seg_frame.masks],
+                }
+            except Exception:
+                # Fallback to state if frame not in storage
+                segmentation_results = get_state("segmentation_results", {})
+                frame_result = segmentation_results.get(frame_index)
+                if frame_result:
+                    frame_result["vlm_labels"] = [None] * len(frame_result.get("labels", []))
+                    frame_result["vlm_sources"] = [None] * len(frame_result.get("labels", []))
+
+            # Load VLM labels (uncertain regions) for pattern detection
             try:
                 uncertain_regions = storage.load_uncertain_regions_by_frame(session_id, frame_index)
             except Exception:
@@ -329,7 +346,7 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
                 mask_indices = frame_result["confidences"] >= confidence_threshold
                 if mask_indices.any():
                     frame_result = {
-                        "masks": frame_result["masks"][mask_indices],
+                        "masks": frame_result.get("masks", np.array([]))[mask_indices] if len(frame_result.get("masks", [])) > 0 else np.array([]),
                         "confidences": frame_result["confidences"][mask_indices],
                         "labels": [
                             label
@@ -339,6 +356,16 @@ def render_main_content(viz_settings: dict, confidence_threshold: float):
                         "bboxes": [
                             bbox
                             for i, bbox in enumerate(frame_result["bboxes"])
+                            if mask_indices[i]
+                        ],
+                        "vlm_labels": [
+                            vlm_label
+                            for i, vlm_label in enumerate(frame_result.get("vlm_labels", []))
+                            if mask_indices[i]
+                        ],
+                        "vlm_sources": [
+                            vlm_source
+                            for i, vlm_source in enumerate(frame_result.get("vlm_sources", []))
                             if mask_indices[i]
                         ],
                     }

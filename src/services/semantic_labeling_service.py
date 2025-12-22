@@ -268,16 +268,22 @@ class SemanticLabelingService:
                 # Evaluate confidence
                 is_uncertain = self._evaluate_vlm_confidence(vlm_query, job.configuration.confidence_threshold)
 
-                # Create UncertainRegion if below confidence threshold
+                # Update SegmentationFrame with VLM label (for ALL regions)
+                if region_id in self._region_metadata:
+                    self._update_segmentation_frame_with_vlm_label(
+                        session_id=session_id,
+                        region_id=region_id,
+                        vlm_query=vlm_query,
+                        is_uncertain=is_uncertain,
+                    )
+
+                # Create UncertainRegion if below confidence threshold (for pattern detection)
                 if is_uncertain and region_id in self._region_metadata:
                     self._create_uncertain_region(
                         session_id=session_id,
                         region_id=region_id,
                         vlm_query=vlm_query,
                     )
-
-                # Update region with label (simplified - would update actual region model)
-                # self._update_region_with_label(region, vlm_query)
 
                 # Update job progress
                 job.regions_pending.pop(0)
@@ -412,6 +418,47 @@ class SemanticLabelingService:
             True if VLM_UNCERTAIN, False otherwise
         """
         return vlm_query.status == VLMQueryStatus.VLM_UNCERTAIN
+
+    def _update_segmentation_frame_with_vlm_label(
+        self,
+        session_id: str,
+        region_id: UUID,
+        vlm_query: VLMQuery,
+        is_uncertain: bool,
+    ) -> None:
+        """Update SegmentationFrame with VLM label for a region.
+
+        Args:
+            session_id: Session ID
+            region_id: Region UUID
+            vlm_query: VLM query result
+            is_uncertain: Whether region is uncertain
+        """
+        # Get metadata for this region
+        metadata = self._region_metadata.get(region_id)
+        if not metadata:
+            return
+
+        frame_idx = metadata["frame_idx"]
+        mask_idx = metadata["mask_idx"]
+
+        # Load segmentation frame
+        frame = self.storage.load_segmentation_frame(session_id, frame_idx)
+
+        # Update the specific mask with VLM label
+        if mask_idx < len(frame.masks):
+            mask = frame.masks[mask_idx]
+
+            # Extract VLM label from response
+            vlm_label = vlm_query.response.get("label", "unknown")
+
+            # Update mask with VLM information
+            mask.semantic_label = vlm_label
+            mask.vlm_query_id = vlm_query.id
+            mask.semantic_label_source = "vlm_uncertain" if is_uncertain else "vlm"
+
+            # Save updated frame back to storage
+            self.storage.save_segmentation_frame(session_id, frame)
 
     def _create_uncertain_region(
         self,
