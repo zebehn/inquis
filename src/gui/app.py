@@ -169,6 +169,8 @@ def create_segmentation_frame_from_result(
     """
     # Create InstanceMask objects
     instance_masks = []
+    session_path = storage.get_session_path(str(session_id))
+
     for i, (mask, conf, label, bbox) in enumerate(zip(
         result.masks,
         result.confidences,
@@ -177,7 +179,7 @@ def create_segmentation_frame_from_result(
     )):
         # Create mask path (will be saved on demand if needed)
         mask_filename = f"mask_{frame_idx:06d}_{i:03d}.npz"
-        mask_path = Path(storage.get_session_dir(str(session_id))) / "masks" / mask_filename
+        mask_path = session_path / "masks" / mask_filename
 
         # Calculate mask area
         area = int(np.sum(mask)) if len(mask.shape) > 0 and mask.size > 0 else bbox[2] * bbox[3]
@@ -200,7 +202,7 @@ def create_segmentation_frame_from_result(
         session_id=session_id,
         frame_index=frame_idx,
         timestamp=frame_idx / metadata["fps"],
-        image_path=Path(storage.get_session_dir(str(session_id))) / "frames" / f"frame_{frame_idx:06d}.jpg",
+        image_path=session_path / "frames" / f"frame_{frame_idx:06d}.jpg",
         masks=instance_masks,
         processing_time=0.1,  # Placeholder
         model_version_id=uuid4(),  # Placeholder
