@@ -1,6 +1,58 @@
-# Self-Improving Visual Perception Agent
+# Inquis: Self-Improving Visual Perception Agent
+
+> **Status**: Active Development | **Version**: 0.2.0-alpha | **Current Feature**: Semantic Labeling for All Regions
 
 A self-improving visual perception system that processes videos through instance segmentation (SAM2), detects uncertain regions, queries vision-language models (GPT-5.2) for labels, generates synthetic training data (Z-Image), and incrementally retrains the segmentation model.
+
+## Project Overview
+
+**Inquis** (from Latin *inquīrere* - to inquire, investigate) is an autonomous AI agent that creates a feedback loop for continuous visual perception improvement. Unlike traditional segmentation models that struggle with ambiguous regions, Inquis:
+
+1. **Segments** videos using SAM2 (Meta's Segment Anything Model 2)
+2. **Detects** regions with low confidence or uncertainty
+3. **Queries** vision-language models (GPT-5.2/GPT-4o) for intelligent semantic labeling
+4. **Generates** synthetic training data using Z-Image (Alibaba Tongyi-MAI)
+5. **Retrains** the segmentation model to improve performance
+6. **Repeats** the cycle with progressively better accuracy
+
+This creates an autonomous learning system where the model identifies and corrects its own weaknesses without manual intervention.
+
+## Development Status
+
+### Current Progress
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **Feature 001: Core Perception Agent** | ✅ 95% Complete | Video segmentation, uncertainty detection, VLM labeling functional |
+| **Feature 002: Semantic Labeling** | 🔄 In Progress | Automatic labeling of all regions with cost controls |
+| **GUI Interface** | ✅ Functional | Streamlit-based, active development |
+| **VLM Integration** | ✅ Complete | Rate limiting, error handling, cost tracking |
+| **Test Coverage** | ✅ Strong | Unit, integration, and contract tests |
+| **Documentation** | ✅ Comprehensive | Specs, plans, research docs maintained |
+
+### Codebase Statistics
+
+- **7,036** lines of Python source code
+- **41** Python modules in `src/`
+- **15+** test files with comprehensive coverage
+- **2** major features specified and in development
+
+### Active Branch
+
+- **Main**: `main` (stable baseline)
+- **Development**: `002-semantic-labeling-all-regions` (current work)
+
+### Roadmap
+
+- [x] **Phase 1-2**: Project setup and foundational infrastructure
+- [x] **Phase 3**: Error handling and rate limiting
+- [x] **Phase 4**: Video processing pipeline
+- [x] **Phase 5**: VLM-assisted labeling for uncertain regions
+- [ ] **Phase 6**: Semantic labeling for ALL regions (current)
+- [ ] **Phase 7**: Synthetic data generation pipeline
+- [ ] **Phase 8**: Model retraining and LoRA fine-tuning
+- [ ] **Phase 9**: Performance optimization and cost reduction
+- [ ] **Phase 10**: Production deployment
 
 ## Features
 
@@ -37,9 +89,14 @@ A self-improving visual perception system that processes videos through instance
 ### 1. Clone Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/zebehn/inquis.git
 cd inquis
-git checkout 001-visual-perception-agent
+
+# For stable version (recommended for new users):
+git checkout main
+
+# For latest development features:
+git checkout 002-semantic-labeling-all-regions
 ```
 
 ### 2. Create Virtual Environment
@@ -204,10 +261,55 @@ Expected performance on RTX 4080 (16GB VRAM):
 
 See [quickstart.md](specs/001-visual-perception-agent/quickstart.md) for detailed troubleshooting guide.
 
+## Development Methodology
+
+Inquis follows **Test-Driven Development (TDD)** and **Tidy First** principles as defined in the [project constitution](.specify/memory/constitution.md):
+
+- **Red-Green-Refactor cycle**: Write failing tests first, implement minimally, then refactor
+- **Structural vs. Behavioral changes**: Never mix refactoring with feature work
+- **Commit discipline**: All tests must pass before committing
+- **Code quality**: Eliminate duplication, express intent clearly, maintain single responsibility
+
+See [constitution.md](.specify/memory/constitution.md) for complete development principles.
+
+## Architecture Highlights
+
+### Modular Design
+
+- **Independent VLM Module** (`src/vlm/`): Standalone OpenAI integration with rate limiting
+- **Service Layer** (`src/services/`): Segmentation, VLM, Storage, Semantic Labeling services
+- **Pydantic Models** (`src/models/`): Type-safe data structures for all domain objects
+- **Streamlit GUI** (`src/gui/`): Component-based UI with clear separation of concerns
+
+### Key Design Decisions
+
+1. **SAM2 provides generic IDs**, VLM adds semantic labels
+2. **Self-improvement focuses on segmentation quality** (predicted_iou), not classification
+3. **VLM uncertainty triggers**: confidence < 0.5 OR 15 ambiguous keywords detected
+4. **Synthetic data dual-scoring**: SAM2 re-segmentation quality + VLM label correspondence
+5. **Cost-conscious**: Budget limits, frame sampling, and cost tracking throughout
+
 ## License
 
-[Add your license here]
+MIT License - Copyright (c) 2025 Minsu Jang
+
+See [LICENSE](LICENSE) for full text.
 
 ## Contributing
 
-[Add contribution guidelines here]
+Contributions are welcome! This project follows strict TDD practices:
+
+1. **Read the constitution** first: [.specify/memory/constitution.md](.specify/memory/constitution.md)
+2. **Write tests first** (Red phase)
+3. **Implement minimally** (Green phase)
+4. **Refactor separately** (never mix structural and behavioral changes)
+5. **All tests must pass** before submitting PR
+6. **Follow commit conventions**: `feat:`, `fix:`, `refactor:`, `tidy:`, `docs:`, `test:`
+
+For major changes, please open an issue first to discuss the proposed changes.
+
+## Contact & Support
+
+- **Issues**: [GitHub Issues](https://github.com/zebehn/inquis/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/zebehn/inquis/discussions)
+- **Author**: Minsu Jang
